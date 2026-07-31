@@ -1,0 +1,94 @@
+[project]
+name = "unified-search-safe-send"
+version = "0.1.0"
+description = "Unified multi-provider search with an exactly-once safe-send gate"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.118",
+    "uvicorn[standard]>=0.37",
+    "sqlmodel>=0.0.24",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30",
+    "alembic>=1.14",
+    "httpx>=0.28",
+    "cryptography>=44.0",
+    "pydantic-settings>=2.7",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=1.0",
+    "pytest-timeout>=2.3",
+    "respx>=0.22",
+    "hypothesis>=6.122",
+    "testcontainers[postgres]>=4.9",
+    "ruff>=0.9",
+    "mypy>=1.14",
+    "import-linter>=2.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# Import names: `core`, `api`, `worker`. The physical nesting under
+# packages/ and apps/ mirrors design D2 and is what import-linter checks.
+packages = ["packages/core", "apps/api", "apps/worker"]
+
+# ---------------------------------------------------------------------------
+# design D2: packages/core imports nothing from apps/. The dependency arrow
+# only ever points inward. This is the module-boundary claim made structurally
+# rather than asserted in a README, so it is enforced rather than reviewed.
+# ---------------------------------------------------------------------------
+[tool.importlinter]
+root_packages = ["core", "api", "worker"]
+# Required for the "no web framework" contract below: fastapi/starlette are
+# external, and import-linter refuses to reason about them without this.
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "core is independent of the deployables"
+type = "forbidden"
+source_modules = ["core"]
+forbidden_modules = ["api", "worker"]
+
+[[tool.importlinter.contracts]]
+name = "core does not import a web framework"
+type = "forbidden"
+source_modules = ["core"]
+forbidden_modules = ["fastapi", "starlette", "uvicorn"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+# contracts.md §5: the partial-results test fails by hanging rather than by
+# asserting, so an unbounded hang must be a loud failure. `thread` because the
+# signal method leaves fixtures unfinalised.
+timeout = 30
+timeout_method = "thread"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+# BLE (blind except) is on deliberately: a bare `except Exception` is exactly
+# how a send-failure classification gets silently swallowed. The health probes
+# are the legitimate exception and carry an explicit noqa.
+select = ["E", "F", "I", "UP", "B", "ASYNC", "S", "BLE", "RUF"]
+ignore = ["S101"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+# So bare `uv run mypy` checks the right tree instead of erroring on a
+# missing target.
+files = ["packages/core", "apps/api", "apps/worker"]
+exclude = ["packages/core/migrations/versions/"]
+
+[[tool.mypy.overrides]]
+module = ["testcontainers.*"]
+ignore_missing_imports = true

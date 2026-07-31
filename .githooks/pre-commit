@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Secret scan on every commit. Enable with:  git config core.hooksPath .githooks
+#
+# This repo handles OAuth refresh tokens, provider client secrets and a
+# token-encryption key. A secret reaching git history is not fixable by a
+# follow-up commit — it is fixable only by rotating the credential. So the
+# hook fails closed: if gitleaks is missing, the commit is blocked rather
+# than silently unscanned.
+set -euo pipefail
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+    cat >&2 <<'EOF'
+pre-commit: gitleaks is not installed, so staged changes cannot be scanned.
+
+    brew install gitleaks        # macOS
+    # https://github.com/gitleaks/gitleaks#installing
+
+Refusing to commit unscanned. To override for a single commit (you are
+asserting you have checked it yourself):
+
+    SKIP_GITLEAKS=1 git commit ...
+EOF
+    [ "${SKIP_GITLEAKS:-0}" = "1" ] || exit 1
+    exit 0
+fi
+
+echo "pre-commit: scanning staged changes with gitleaks..."
+if ! gitleaks protect --staged --redact --verbose; then
+    cat >&2 <<'EOF'
+
+pre-commit: BLOCKED — gitleaks found a likely secret in staged changes.
+
+If it is a real secret: unstage it, rotate the credential, and put the value
+in .env (git-ignored) or Secret Manager.
+
+If it is a false positive: add a narrowly-scoped rule to .gitleaks.toml, or
+append the `gitleaks:allow` comment to that specific line. Do not disable the
+hook wholesale.
+EOF
+    exit 1
+fi

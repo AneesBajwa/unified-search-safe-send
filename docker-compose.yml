@@ -1,0 +1,91 @@
+# `docker compose up` is the whole local setup. Phase 0 proves the path:
+# Vite page -> API -> Postgres, with the migration applied on the way.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: app
+    ports:
+      # 5433 on the host, not 5432: a natively-installed Postgres commonly
+      # already owns 5432, and Docker's bind on 0.0.0.0 loses to it for
+      # `localhost` connections — which surfaces as `role "app" does not
+      # exist` against someone else's database rather than as a port clash.
+      # Inside the compose network everything still talks to db:5432.
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Migrations as their own one-shot service rather than an API entrypoint
+  # hook: two API replicas starting together would otherwise race on the same
+  # migration, and the failure mode is a half-applied schema.
+  migrate:
+    build: .
+    command: alembic upgrade head
+    environment:
+      DATABASE_URL: postgresql+asyncpg://app:app@db:5432/app
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build: .
+    command: sh -c "exec uvicorn api.main:app --host 0.0.0.0 --port 8080 --reload"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://app:app@db:5432/app
+      APP_BASE_URL: http://localhost:8080
+      CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+      RUN_WORKER_INLINE: "1"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./packages:/app/packages
+      - ./apps/api:/app/apps/api
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    build: .
+    command: sh -c "exec uvicorn worker.main:app --host 0.0.0.0 --port 8081"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://app:app@db:5432/app
+      RUN_WORKER_INLINE: "0"
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./packages:/app/packages
+      - ./apps/worker:/app/apps/worker
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  web:
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    environment:
+      VITE_API_BASE_URL: http://localhost:8080
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./apps/web:/app
+      - webnodemodules:/app/node_modules
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  webnodemodules:

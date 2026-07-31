@@ -1,0 +1,50 @@
+# ---------- secrets (first, deliberately — these matter most) ----------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+!**/script.py.mako
+secrets/
+/secrets
+client_secret*.json
+*credentials*.json
+service-account*.json
+keyring.txt
+.keyring
+
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+.hypothesis/
+
+# ---------- Node ----------
+node_modules/
+apps/web/dist/
+apps/web/.vite/
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---------- tooling / OS ----------
+.DS_Store
+*.swp
+.idea/
+.vscode/
+!.vscode/extensions.json
