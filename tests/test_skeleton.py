@@ -68,8 +68,37 @@ def test_url_normalises_to_asyncpg_and_disables_statement_cache(given: str) -> N
     assert "prepared_statement_cache_size=0" in url
 
 
-def test_existing_query_string_is_preserved() -> None:
-    url = Settings(database_url="postgresql://u:p@h/db?sslmode=require").sqlalchemy_url
-    assert "sslmode=require" in url
+def test_real_neon_url_is_accepted() -> None:
+    """Regression: the exact URL shape `neonctl` hands out.
+
+    asyncpg has no `sslmode` kwarg, so passing Neon's string through raised
+    `TypeError: connect() got an unexpected keyword argument 'sslmode'` from
+    inside the pool. Caught against a live Neon endpoint on 2026-07-31; this
+    pins the translation so it cannot regress into a first-boot failure on
+    Cloud Run, where DATABASE_URL arrives from Secret Manager in this form.
+    """
+    url = Settings(
+        database_url=(
+            "postgresql://neondb_owner:pw@ep-x-pooler.c-12.us-east-1.aws.neon.tech"
+            "/neondb?sslmode=require&channel_binding=require"
+        )
+    ).sqlalchemy_url
+
+    assert url.startswith("postgresql+asyncpg://")
+    assert "sslmode" not in url, "libpq spelling must not survive"
+    assert "ssl=require" in url, "TLS must still be demanded, under asyncpg's name"
+    assert "channel_binding" not in url, "libpq-only; asyncpg negotiates it itself"
     assert "prepared_statement_cache_size=0" in url
+
+
+def test_explicit_ssl_is_not_overwritten_by_sslmode() -> None:
+    url = Settings(database_url="postgresql://u:p@h/db?ssl=verify-full&sslmode=require").sqlalchemy_url
+    assert "ssl=verify-full" in url
+    assert "sslmode" not in url
+
+
+def test_password_containing_url_delimiters_survives() -> None:
+    """Parsed, not string-patched — a `?` in a password must not split the query."""
+    url = Settings(database_url="postgresql://u:p%3Fa%26b@h/db?sslmode=require").sqlalchemy_url
     assert url.count("?") == 1
+    assert "p%3Fa%26b" in url

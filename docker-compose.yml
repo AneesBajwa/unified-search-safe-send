@@ -3,7 +3,11 @@
 
 services:
   db:
-    image: postgres:16-alpine
+    # 17 to match Neon (which serves 17.x), not the 16 the docs floor at.
+    # design.md D5's isolation-level findings were verified on 17.9, and
+    # testing the send gate on 16 while deploying onto 17 is exactly the kind
+    # of parity gap that surfaces as an unreproducible concurrency bug.
+    image: postgres:17-alpine
     environment:
       POSTGRES_USER: app
       POSTGRES_PASSWORD: app

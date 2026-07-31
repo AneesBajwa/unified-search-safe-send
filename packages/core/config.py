@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -34,28 +35,44 @@ class Settings(BaseSettings):
 
     @property
     def sqlalchemy_url(self) -> str:
-        """Normalise to the asyncpg driver and disable the statement cache.
+        """Turn whatever the environment hands us into a URL asyncpg accepts.
 
-        Two fixes applied once here rather than at every call site:
+        Every provider emits a **libpq** connection string; asyncpg does not
+        speak libpq's vocabulary, and the mismatch surfaces as a `TypeError`
+        deep inside the pool rather than as a configuration error. Verified
+        against a real Neon endpoint 2026-07-31.
 
-        1. Neon, Cloud Run and most tooling hand out bare ``postgresql://``
-           URLs. Passing one to an async engine fails with a driver error
-           that reads like a network problem.
-        2. ``prepared_statement_cache_size=0`` is mandatory behind a
-           transaction-mode pooler — pgbouncer cannot route a named prepared
+        1. Driver — `postgresql://` must become `postgresql+asyncpg://`.
+        2. `sslmode` -> `ssl`. asyncpg has no `sslmode` kwarg, so Neon's
+           default `?sslmode=require` raises
+           `TypeError: connect() got an unexpected keyword argument 'sslmode'`.
+           The *values* are the same vocabulary, so this is a pure rename.
+        3. `channel_binding` is dropped — libpq-only. asyncpg negotiates SCRAM
+           channel binding itself over TLS, so nothing is weakened.
+        4. `prepared_statement_cache_size=0` is mandatory behind a
+           transaction-mode pooler: pgbouncer cannot route a named prepared
            statement back to the session that created it. SQLAlchemy accepts
-           this only as a URL query argument; as a ``create_engine`` kwarg it
-           raises ``TypeError: Invalid argument(s)``.
+           it *only* as a URL argument; as a `create_engine` kwarg it raises
+           `TypeError: Invalid argument(s)`.
+
+        Parsed rather than string-patched so a password containing `?` or `&`
+        cannot corrupt the query string.
         """
         url = self.database_url
-        if url.startswith("postgres://"):
-            url = url.replace("postgres://", "postgresql+asyncpg://", 1)
-        elif url.startswith("postgresql://"):
-            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        for prefix in ("postgres://", "postgresql://"):
+            if url.startswith(prefix):
+                url = "postgresql+asyncpg://" + url[len(prefix) :]
+                break
 
-        if "prepared_statement_cache_size" not in url:
-            url += ("&" if "?" in url else "?") + "prepared_statement_cache_size=0"
-        return url
+        parts = urlsplit(url)
+        params = dict(parse_qsl(parts.query, keep_blank_values=True))
+
+        if (sslmode := params.pop("sslmode", None)) and "ssl" not in params:
+            params["ssl"] = sslmode
+        params.pop("channel_binding", None)
+        params["prepared_statement_cache_size"] = "0"
+
+        return urlunsplit(parts._replace(query=urlencode(params)))
 
 
 @lru_cache(maxsize=1)
