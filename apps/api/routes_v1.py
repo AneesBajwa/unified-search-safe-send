@@ -428,7 +428,20 @@ def _source_view(row: dict[str, Any]) -> dict[str, Any]:
         if row["error_class"] == "needs_reconnect" and row["connection_id"]:
             # Rendered as an action at the point of failure, never as a global
             # error — a dead end here is a dead end in the product.
-            view["error"]["reconnect_url"] = f"/v1/connections/{row['connection_id']}/reconnect"
+            #
+            # 🔴 Through the helper, not hand-rolled. This line used to build
+            # `/v1/connections/{id}/reconnect` by hand, which is not a route and
+            # answered 404 — so the one action that repairs a revoked grant, on
+            # the surface where the user actually meets one, went nowhere. The
+            # sentence above was true and the code below it was not.
+            #
+            # `source` is the provider name for any source that carries a
+            # connection: `plan_search` attaches connections by matching
+            # `connections.provider` to the source name, so a row with a
+            # `connection_id` has them equal by construction.
+            view["error"]["reconnect_url"] = connections_service.reconnect_url(
+                int(row["connection_id"]), str(row["source"])
+            )
     return view
 
 

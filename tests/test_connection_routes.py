@@ -185,6 +185,96 @@ async def test_a_needs_reconnect_row_carries_the_way_back(
     assert row["reconnect_url"].endswith(f"reconnect={target['id']}")
 
 
+@pytest.fixture
+def reconnect_source() -> Iterator[str]:
+    """A source named for a provider that fails with a revoked grant.
+
+    Named `gmail` and `requires_connection=True` so `plan_search` attaches the
+    connection — without one the snapshot carries no `reconnect_url` at all and
+    there is nothing to assert.
+    """
+    from core.adapters import registry
+    from core.adapters.types import AdapterContext, Result
+    from core.enums import SourceMode
+    from core.errors import ProviderError
+
+    class RevokedGmail:
+        source = "gmail"
+
+        async def search(self, query: str, ctx: AdapterContext) -> list[Result]:
+            raise ProviderError(
+                provider="google",
+                code="invalid_grant",
+                detail='{"error": "invalid_grant"}',
+                status=400,
+            )
+
+    registry.register(
+        "gmail", RevokedGmail, participates_by_default=False,
+        mode=SourceMode.LIVE, requires_connection=True,
+    )
+    try:
+        yield "gmail"
+    finally:
+        from core.adapters import live
+
+        registry.clear()
+        live.register_defaults()
+
+
+async def test_every_advertised_reconnect_url_resolves(
+    client: tuple[httpx.AsyncClient, dict[str, str], int],
+    reconnect_source: str,
+    configured: None,
+) -> None:
+    """🔴 The one-click fix must actually be one click.
+
+    Found by hand: the **search snapshot** built its `reconnect_url` by string
+    interpolation as `/v1/connections/{id}/reconnect`, which is not a route and
+    answered **404**. The connections *listing* went through
+    `connections_service.reconnect_url` and was fine — so the two surfaces
+    disagreed, and the broken one was the surface where a user actually meets a
+    revoked grant. That is success criterion 5 and the demo's best moment,
+    landing on a dead page.
+
+    The suite could not see it because every existing assertion checked the
+    string's *shape* (`.endswith("reconnect=...")`) and never that anything was
+    served there. So this test follows the URL.
+    """
+    from core.adapters import orchestrator
+    from core.db import session_scope
+    from core.jobs import runtime
+
+    http, auth, user_id = client
+
+    async with session_scope() as session:
+        plan = await orchestrator.plan_search(
+            session, user_id=user_id, query="invoice", sources=[reconnect_source]
+        )
+        await session.commit()
+    while (await runtime.run_once(limit=5)).claimed:
+        pass
+
+    snapshot = (await http.get(f"/v1/searches/{plan.search_id}", headers=auth)).json()
+    source = snapshot["sources"][0]
+    assert source["status"] == "needs_reconnect"
+
+    advertised = [source["error"]["reconnect_url"]]
+    listing = (await http.get("/v1/connections", headers=auth)).json()["connections"]
+    advertised += [row["reconnect_url"] for row in listing if row.get("reconnect_url")]
+
+    for url in advertised:
+        response = await http.get(url, headers=auth)
+        assert response.status_code == 200, (
+            f"the reconnect URL we handed the user, {url!r}, answered "
+            f"{response.status_code}. The one action that repairs a revoked "
+            "grant must lead somewhere."
+        )
+        assert response.json()["authorize_url"].startswith("https://"), (
+            f"{url!r} resolved but produced no provider URL to send the browser to"
+        )
+
+
 async def test_disconnecting_someone_elses_connection_is_a_404(
     client: tuple[httpx.AsyncClient, dict[str, str], int],
 ) -> None:
