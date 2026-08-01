@@ -148,9 +148,20 @@ make seed
 
 Ports 8080 (api), 8081 (worker), 5173 (SPA) and 5433 (Postgres) forward
 automatically. The SPA derives its API host from the page it was served from
-(see `apps/web/src/api/client.ts`), so the forwarded SPA URL reaches the
-forwarded API with no rebuild — set `VITE_API_BASE_URL` only if you move the API
-somewhere else.
+(`apps/web/src/api/client.ts`), so the forwarded SPA URL reaches the forwarded
+API with no rebuild — set `VITE_API_BASE_URL` only if you move the API somewhere
+else.
+
+🔴 **Codespaces puts the forwarded port in the hostname, not after a colon** —
+`https://<name>-5173.app.github.dev`. Two things follow, and both were wrong
+until they were looked at directly:
+
+- the SPA rewrites the port *label* to find the API rather than appending
+  `:8080`, which would resolve to nothing (`deriveApiBaseUrl`, and it has a test
+  precisely because the case is unreachable from a laptop);
+- `CORS_ORIGINS` has to include the forwarded SPA origin, so the devcontainer
+  builds it from `CODESPACE_NAME`. With only the localhost pair, the API rejects
+  every request the console makes.
 
 ⚠️ **OAuth in a Codespace needs one extra step.** Google and Slack match
 redirect URIs byte-exactly, so a forwarded Codespace hostname has to be

@@ -26,7 +26,10 @@ export default defineConfig({
     // One component is unit-tested and it is `SourceStatusChip` — see its test
     // file for why that one and not the others.
     environment: "jsdom",
-    include: ["src/**/*.test.tsx"],
+    // `.ts` as well as `.tsx` — a glob that quietly matched only components
+    // meant a new test file for `client.ts` was collected by nobody and passed
+    // by default.
+    include: ["src/**/*.test.{ts,tsx}"],
     restoreMocks: true,
   },
 });

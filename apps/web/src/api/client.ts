@@ -20,18 +20,48 @@
 
 import type { ApiErrorBody } from "./errors";
 
+/** The port the API is served on, everywhere except a forwarded environment. */
+const API_PORT = "8080";
+const SPA_PORT = "5173";
+
 /**
- * Where the API lives.
+ * Where the API lives, derived from where this page came from.
  *
- * `VITE_API_BASE_URL` wins when it is set, which is how a deployed SPA is
- * pointed at Cloud Run. With nothing set we derive it from the page's own host
- * rather than hardcoding `localhost`, and that is not a nicety: a phone loading
- * this over the LAN and calling `http://localhost:8080` is calling *itself*,
- * which presents as every request failing for no visible reason.
+ * Three environments, and only one of them can be hardcoded:
+ *
+ * - **Local and LAN** — same host, different port. Hardcoding `localhost` here
+ *   is why a phone on the LAN fails: it calls *itself* and every request dies
+ *   for no visible reason.
+ * - **GitHub Codespaces** — 🔴 the port is in the **hostname**, not after a
+ *   colon: `https://<name>-5173.app.github.dev`. So the naive `:8080` form
+ *   produces `https://<name>-5173.app.github.dev:8080`, which resolves to
+ *   nothing. DL3 says the project must run in Codespaces, and with the naive
+ *   form the console could not reach its own API there at all.
+ * - **Deployed** — different host entirely, so `VITE_API_BASE_URL` wins and
+ *   none of this runs.
+ *
+ * Exported for its own test: the Codespaces case is not reachable from a
+ * laptop, so the only honest way to check it is to feed the function the URL
+ * Codespaces actually serves.
  */
+export function deriveApiBaseUrl(location: {
+  protocol: string;
+  hostname: string;
+}): string {
+  // A forwarded port lives in the first label of the hostname. Rewriting that
+  // label is the only thing that works, and appending a port is the thing that
+  // silently does not.
+  if (location.hostname.endsWith(".app.github.dev")) {
+    return `${location.protocol}//${location.hostname.replace(
+      new RegExp(`-${SPA_PORT}\\.`),
+      `-${API_PORT}.`,
+    )}`;
+  }
+  return `${location.protocol}//${location.hostname}:${API_PORT}`;
+}
+
 export const API_BASE_URL: string =
-  import.meta.env.VITE_API_BASE_URL?.trim() ||
-  `${window.location.protocol}//${window.location.hostname}:8080`;
+  import.meta.env.VITE_API_BASE_URL?.trim() || deriveApiBaseUrl(window.location);
 
 const KEY_STORAGE = "usss.api_key";
 const IDENTITY_STORAGE = "usss.identity";
