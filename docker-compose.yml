@@ -35,6 +35,13 @@ services:
     command: alembic upgrade head
     environment:
       DATABASE_URL: postgresql+asyncpg://app:app@db:5432/app
+    volumes:
+      # Mounted for the same reason api and worker are: without it the baked
+      # image's migration set is whatever existed at build time, and a new
+      # revision fails with "Can't locate revision identified by '0002'" —
+      # which reads like database corruption rather than a stale image.
+      - ./packages:/app/packages
+      - ./alembic.ini:/app/alembic.ini
     depends_on:
       db:
         condition: service_healthy
@@ -47,12 +54,22 @@ services:
       DATABASE_URL: postgresql+asyncpg://app:app@db:5432/app
       APP_BASE_URL: http://localhost:8080
       CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
-      RUN_WORKER_INLINE: "1"
+      RUN_WORKER_INLINE: "${RUN_WORKER_INLINE:-1}"
+      # Turn these on to watch partial results happen rather than infer them:
+      #   SLOW_ADAPTER_SOURCE=slack SLOW_ADAPTER_DELAY_MS=8000 docker compose up -d api
+      SLOW_ADAPTER_SOURCE: "${SLOW_ADAPTER_SOURCE:-}"
+      SLOW_ADAPTER_DELAY_MS: "${SLOW_ADAPTER_DELAY_MS:-0}"
+      # The fake provider's ledger, on a bind mount shared with the worker.
+      # It is what "how many messages did the provider actually receive?" is
+      # answered from — a question no database row can answer — and being on
+      # disk is what lets it survive a worker being killed mid-dispatch.
+      FAKE_PROVIDER_LEDGER: /var/fake-provider/deliveries.jsonl
     ports:
       - "8080:8080"
     volumes:
       - ./packages:/app/packages
       - ./apps/api:/app/apps/api
+      - ./.fake-provider:/var/fake-provider
     depends_on:
       db:
         condition: service_healthy
@@ -65,11 +82,16 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://app:app@db:5432/app
       RUN_WORKER_INLINE: "0"
+      FAKE_PROVIDER_LEDGER: /var/fake-provider/deliveries.jsonl
+      # Set to a few thousand to watch a send sit in flight — and to make
+      # "kill the worker mid-dispatch" a thing a person can actually do.
+      FAKE_PROVIDER_DELAY_MS: "${FAKE_PROVIDER_DELAY_MS:-0}"
     ports:
       - "8081:8081"
     volumes:
       - ./packages:/app/packages
       - ./apps/worker:/app/apps/worker
+      - ./.fake-provider:/var/fake-provider
     depends_on:
       db:
         condition: service_healthy

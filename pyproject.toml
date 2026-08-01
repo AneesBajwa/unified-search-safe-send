@@ -81,6 +81,18 @@ line-length = 100
 select = ["E", "F", "I", "UP", "B", "ASYNC", "S", "BLE", "RUF"]
 ignore = ["S101"]
 
+[tool.ruff.lint.per-file-ignores]
+# The migrations transcribe openspec data-model.md's DDL verbatim so the two can
+# be diffed line for line. Reflowing it to 100 columns would break that.
+"packages/core/migrations/versions/*.py" = ["E501"]
+# S105/S106 flag string literals that *look* like credentials. In the provider
+# tests they are exactly that on purpose: fake tokens in the real providers'
+# shapes, so the redaction patterns and the token routing are tested against
+# what a real value looks like rather than against "secret". Suppressed per
+# directory rather than with 30 inline noqa comments, which would be noise
+# obscuring the one place the rule might genuinely fire.
+"tests/*.py" = ["S105", "S106"]
+
 [tool.mypy]
 python_version = "3.13"
 strict = true

@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,10 +28,72 @@ class Settings(BaseSettings):
     slow_adapter_delay_ms: int = 0
     slow_adapter_source: str = ""
 
-    # Present for the contract; unused until phase 1. The app fails closed when
-    # this is absent and token material is actually needed — there is no
-    # plaintext fallback and no generate-if-missing path.
-    token_keyring: str = Field(default="", repr=False)
+    # Worker knobs. Not in the contracts.md matrix because they are the same
+    # everywhere: on Cloud Run the worker is driven by Cloud Tasks and Cloud
+    # Scheduler, so only the inline loop ever reads the intervals.
+    job_batch_size: int = 5
+    worker_poll_seconds: float = 1.0
+    sweep_interval_seconds: float = 15.0
+    # The per-job wall clock. `job_lease_seconds` is deliberately 3x this: a
+    # slow-but-live job must never be reclaimed, because reclaiming a live send
+    # is strictly worse than reclaiming a dead one slowly (risks.md R28).
+    # Distinct from `adapter_deadline_seconds`, which is the tighter budget for
+    # a single provider call inside an adapter run (task 4.6).
+    job_deadline_seconds: int = 30
+    # Sends get their own, larger budget: one execution may dispatch *and*
+    # reconcile, which does not fit an adapter's 30 s. Kept comfortably under
+    # `send_lease_seconds` (300) so the deadline always fires before the lease
+    # expires — the other order means the sweeper reconciles a live send.
+    send_deadline_seconds: int = 120
+
+    # Dev-only surface: the `/dev` routes the smoke test drives, and the
+    # `fault:` seam in the adapter handler. Set DEV_ROUTES=0 on Cloud Run.
+    # Task group 9 replaces these with the real authenticated public API.
+    dev_routes: bool = True
+
+    # The app fails closed when this is absent and token material is actually
+    # needed — there is no plaintext fallback and no generate-if-missing path.
+    # `SecretStr` so an accidental `print(settings)` or a pydantic validation
+    # traceback is already safe (task 6.2b).
+    token_keyring: SecretStr = Field(default=SecretStr(""), repr=False)
+    # 🔴 A **file**, not the env var above. Env vars resolve at instance start,
+    # so rotating one forces a redeploy, and they leak through
+    # /proc/self/environ, debug endpoints and subprocess environments (R9).
+    # The env var stays as the local-dev fallback and nothing more.
+    token_keyring_path: str = "/secrets/keyring"  # noqa: S105 - a path, not a secret
+
+    # ---------------------------------------------------------------- OAuth
+    google_client_id: str = ""
+    google_client_secret: SecretStr = Field(default=SecretStr(""), repr=False)
+    slack_client_id: str = ""
+    slack_client_secret: SecretStr = Field(default=SecretStr(""), repr=False)
+    slack_signing_secret: SecretStr = Field(default=SecretStr(""), repr=False)
+    # 🔴 Slack rejects `http://localhost` redirect URIs outright, so an HTTPS
+    # tunnel is a prerequisite for any local Slack OAuth work rather than a
+    # convenience (R18). Empty means "no tunnel"; redirect URIs then fall back
+    # to APP_BASE_URL, which works for Google and not for Slack.
+    oauth_tunnel_url: str = ""
+
+    # Unset => the search adapter serves a deterministic fixture set and reports
+    # mode `mock`, which the UI badges. Tests always run against the mock.
+    web_search_api_key: SecretStr = Field(default=SecretStr(""), repr=False)
+
+    @property
+    def public_base_url(self) -> str:
+        """What a provider must be able to reach us on.
+
+        The tunnel wins when present: a redirect URI has to be an address the
+        *provider* can call back, which `localhost` is not for Slack and is not
+        for anyone once this is deployed.
+        """
+        return (self.oauth_tunnel_url or self.app_base_url).rstrip("/")
+
+    def redirect_uri(self, provider: str) -> str:
+        """⚠️ Exact match at runtime — scheme, case and trailing slash all count.
+        `…/callback` and `…/callback/` are different URIs to Google, and there
+        are no wildcards. Built in one place so the value registered in the
+        console and the value sent at runtime cannot drift."""
+        return f"{self.public_base_url}/v1/connections/callback/{provider}"
 
     @property
     def sqlalchemy_url(self) -> str:

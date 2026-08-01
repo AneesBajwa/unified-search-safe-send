@@ -1,0 +1,50 @@
+{
+  "name": "unified-search-safe-send",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+  "features": {
+    // Docker-in-Docker rather than docker-outside-of-docker: the test suite
+    // starts its own Postgres via testcontainers, so the container needs a
+    // daemon it actually controls.
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    "ghcr.io/devcontainers/features/python:1": { "version": "3.13" },
+    "ghcr.io/devcontainers/features/node:1": { "version": "22" }
+  },
+
+  "forwardPorts": [8080, 8081, 5173, 5433],
+  "portsAttributes": {
+    "8080": { "label": "api", "onAutoForward": "notify" },
+    "8081": { "label": "worker", "onAutoForward": "silent" },
+    "5173": { "label": "spa", "onAutoForward": "openPreview" },
+    "5433": { "label": "postgres", "onAutoForward": "silent" }
+  },
+
+  "containerEnv": {
+    // Codespaces forwards on HTTPS already, so no tunnel is needed here — the
+    // OAUTH_TUNNEL_URL in contracts.md §3 is a local-only concern (Slack
+    // rejects http://localhost redirect URLs outright).
+    "RUN_WORKER_INLINE": "1",
+    "DEV_ROUTES": "1",
+    // The SPA is served from a *different* forwarded host than the API in
+    // Codespaces, so it is cross-origin there just as it is locally.
+    "CORS_ORIGINS": "http://localhost:5173,http://127.0.0.1:5173"
+  },
+
+  "onCreateCommand": "curl -LsSf https://astral.sh/uv/install.sh | sh",
+  "postCreateCommand": "$HOME/.local/bin/uv sync --all-extras && (cd apps/web && npm install)",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "charliermarsh.ruff",
+        "ms-python.python",
+        "ms-python.mypy-type-checker",
+        "ms-azuretools.vscode-docker"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python"
+      }
+    }
+  },
+
+  "remoteUser": "vscode"
+}

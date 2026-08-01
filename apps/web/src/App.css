@@ -1,120 +1,279 @@
+/*
+ * Crude on purpose. Phase 5 polishes; this exists so the product loop is
+ * clickable end to end. The one place effort went is `.confirm`, because a
+ * cramped or ambiguous confirm step *is* the misfire this product prevents
+ * (risks.md R13) — and mobile is where misfires happen, so these are
+ * mobile-first with desktop added by media query.
+ */
+
 .app {
-  max-width: 42rem;
+  max-width: 46rem;
   margin: 0 auto;
-  padding: 2.5rem 1.25rem 4rem;
+  padding: 1rem;
 }
 
-h1 {
-  font-size: 1.5rem;
-  margin: 0;
+.topbar h1 {
+  font-size: 1.1rem;
+  margin: 0 0 0.5rem;
 }
 
-.subtitle,
+.topbar nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  border-bottom: 1px solid #ddd;
+  padding-bottom: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.topbar nav a {
+  /* 44px minimum touch target. */
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.topbar nav a.active {
+  font-weight: 700;
+}
+
 .muted {
-  color: var(--muted);
+  color: #666;
+  font-size: 0.85rem;
 }
 
-.subtitle {
-  margin: 0.25rem 0 2rem;
+.bad {
+  color: #a11;
+}
+
+.searchbar {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.searchbar input {
+  flex: 1;
+  min-height: 44px;
+  padding: 0 0.5rem;
+}
+
+button,
+.button {
+  min-height: 44px;
+  padding: 0 0.9rem;
+  cursor: pointer;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.chip {
+  border: 1px solid #bbb;
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+/* "we looked and found nothing" and "we did not look" must never look alike. */
+.chip-done { border-color: #2a7; }
+.chip-running { border-color: #59f; font-style: italic; }
+.chip-failed { border-color: #a11; color: #a11; }
+.chip-reconnect { border-color: #d80; color: #a60; font-weight: 700; }
+
+.results {
+  display: grid;
+  gap: 0.75rem;
 }
 
 .card {
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--card);
-  padding: 1.25rem;
-}
-
-.card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-h2 {
-  font-size: 1rem;
-  margin: 0;
-}
-
-button {
-  font: inherit;
-  padding: 0.4rem 0.9rem;
-  border: 1px solid var(--line);
+  border: 1px solid #ddd;
   border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg);
-  cursor: pointer;
-  /* 44px minimum touch target — this app is mobile-critical throughout. */
-  min-height: 2.75rem;
+  padding: 0.75rem;
 }
 
-button:disabled {
-  opacity: 0.55;
-  cursor: default;
+.card header,
+.card footer {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  font-size: 0.8rem;
 }
 
-.target {
-  margin: 0.5rem 0 1rem;
-  color: var(--muted);
-  font-size: 0.875rem;
+.card h3 {
+  margin: 0.35rem 0;
+  font-size: 1rem;
+}
+
+.snippet {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+}
+
+.source {
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+}
+
+.rows {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.rows li,
+.rows li a {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  min-height: 44px;
+}
+
+.row-title {
+  flex: 1;
+  min-width: 12rem;
   overflow-wrap: anywhere;
 }
 
-code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.9em;
+.badge {
+  border-radius: 4px;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.75rem;
+  border: 1px solid currentColor;
 }
 
-.pill {
-  display: inline-block;
-  margin: 0 0 0.75rem;
-  padding: 0.15rem 0.6rem;
-  border-radius: 999px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+.badge-ok { color: #171; }
+.badge-bad { color: #a11; }
+.badge-flight { color: #36c; }
+/* Amber, not red. Failed means we know nothing was sent; uncertain means we do
+   not know, and conflating them invites exactly the wrong action. */
+.badge-doubt { color: #d18b00; background: rgba(209, 139, 0, 0.12); }
+.badge-seed { color: #666; }
+
+.compose {
+  display: grid;
+  gap: 0.75rem;
+  max-width: 34rem;
 }
 
-.pill-good { color: var(--good); background: var(--good-bg); }
-.pill-warn { color: var(--warn); background: var(--warn-bg); }
-.pill-bad  { color: var(--bad);  background: var(--bad-bg); }
-.bad { color: var(--bad); }
+.compose label {
+  display: grid;
+  gap: 0.25rem;
+}
 
-dl {
+.compose input,
+.compose select,
+.compose textarea {
+  min-height: 44px;
+  padding: 0.4rem;
+  font: inherit;
+}
+
+/* ---------------------------------------------------------------- confirm */
+
+.confirm .destination {
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1.35;
+  margin: 0.5rem 0 0.75rem;
+}
+
+.destination-detail {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 0.4rem 1rem;
-  margin: 0;
+  gap: 0.25rem 0.75rem;
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
 }
 
-dt {
-  color: var(--muted);
-  font-size: 0.875rem;
-}
+.destination-detail dt { color: #666; }
+.destination-detail dd { margin: 0; overflow-wrap: anywhere; }
 
-dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-pre {
-  overflow-x: auto;
-  padding: 0.75rem;
+/* The full body, scrollable, never truncated: a customer cannot confirm what
+   they cannot read. */
+.body-preview {
+  border: 1px solid #ccc;
   border-radius: 6px;
-  background: var(--bad-bg);
-  color: var(--bad);
+  padding: 0.75rem;
+  max-height: 40vh;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  /* Translucent grey rather than a fixed near-white: the page follows the
+     system colour scheme, and a hardcoded light background put light text on
+     light and made the body unreadable — in the one component whose entire
+     requirement is that the customer can read the body before confirming. */
+  background: rgba(127, 127, 127, 0.12);
+  color: inherit;
+}
+
+.confirm-actions {
+  display: flex;
+  flex-direction: column;
+  margin-top: 1.25rem;
+}
+
+.confirm-actions .primary {
+  font-weight: 700;
+  min-height: 52px;
+}
+
+/* Confirm and Cancel are never adjacent. On a phone that gap is the whole
+   defence against a mistap. */
+.confirm-actions .gap {
+  height: 24px;
+}
+
+.confirm-actions .cancel {
+  width: 100%;
+  min-height: 48px;
+}
+
+.digest { margin-top: 1rem; overflow-wrap: anywhere; }
+
+.sent {
+  border: 1px solid #2a7;
+  border-radius: 6px;
+  padding: 0.6rem;
+  margin-top: 0.75rem;
+}
+
+.doubt {
+  border: 1px solid #d90;
+  background: rgba(217, 153, 0, 0.1);
+  border-radius: 6px;
+  padding: 0.75rem;
+  margin: 1rem 0;
+}
+
+.error-detail {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-x: auto;
+  background: rgba(127, 127, 127, 0.12);
+  color: inherit;
+  padding: 0.6rem;
+  border-radius: 4px;
   font-size: 0.8rem;
 }
 
-footer {
-  margin-top: 2rem;
-  font-size: 0.875rem;
-}
+.empty { padding: 1rem 0; }
 
-@media (max-width: 420px) {
-  dl { grid-template-columns: 1fr; gap: 0.1rem 0; }
-  dt { margin-top: 0.6rem; }
-  .card-head { flex-direction: column; align-items: flex-start; }
+@media (min-width: 40rem) {
+  .confirm-actions {
+    flex-direction: row-reverse;
+    justify-content: flex-start;
+  }
+  .confirm-actions .gap { width: 24px; height: auto; }
+  .confirm-actions .cancel { width: auto; }
 }

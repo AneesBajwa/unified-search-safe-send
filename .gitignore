@@ -48,3 +48,6 @@ pnpm-debug.log*
 .idea/
 .vscode/
 !.vscode/extensions.json
+
+# The fake provider ledger (local demo state, never real data).
+.fake-provider/
