@@ -138,12 +138,17 @@ uv run uvicorn api.main:app --reload --port 8080
 cd apps/web && npm install && npm run dev
 ```
 
-⚠️ **Only the host process reads `.env`.** The compose `api` container does not,
-so `configured_sources()` reports every provider unconfigured there and the
-adapters fall back to fixtures badged `mock`. If you are working against real
-Gmail or Slack credentials, run uvicorn on the host and keep Docker's `api`
-stopped — otherwise whichever wins port 8080 decides whether you are testing
-live providers or fixtures, silently.
+⚠️ **Two processes cannot both own port 8080.** If you run uvicorn on the host,
+keep Docker's `api` stopped — otherwise whichever wins the bind decides what you
+are testing, silently, and the symptom is a stale build you then debug for an
+hour. `lsof -nP -iTCP:8080 -sTCP:LISTEN` says who has it, and `pkill -f "uvicorn
+apps.api.main"` is the reliable way to stop the host one (a plain `kill` on the
+pid `lsof` reports has been observed to leave it running).
+
+The compose stack reads `.env` for the credential surface, so `docker compose
+up` and the host process behave the same way. Unset values mean every provider
+reports itself unconfigured and the adapters serve fixtures badged `mock` — the
+safe default, and visible on every source chip rather than silent.
 
 ### GitHub Codespaces
 

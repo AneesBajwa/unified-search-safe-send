@@ -67,6 +67,27 @@ services:
       # back a missing `Access-Control-Allow-Origin`.
       CODESPACE_NAME: "${CODESPACE_NAME:-}"
       GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN: "${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-}"
+      # 🔴 The credential surface, passed through from `.env` — which docker
+      # compose reads for substitution — rather than withheld.
+      #
+      # It used to be withheld, and that made `docker compose up` a stack where
+      # OAuth **could not work at all**: signing the authorize state needs the
+      # keyring, so the first thing anyone clicks answered a 500. In a Codespace
+      # there is no host process to fall back to, so the documented path was the
+      # only path and it was broken. Found by booting one.
+      #
+      # Empty is still the default, so a developer who has not filled in `.env`
+      # gets exactly what they got before: every provider unconfigured, fixtures
+      # badged `mock`, and no way to reach a real inbox by accident.
+      TOKEN_KEYRING: "${TOKEN_KEYRING:-}"
+      TOKEN_KEYRING_PATH: "${TOKEN_KEYRING_PATH:-/secrets/keyring}"
+      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
+      GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
+      SLACK_CLIENT_ID: "${SLACK_CLIENT_ID:-}"
+      SLACK_CLIENT_SECRET: "${SLACK_CLIENT_SECRET:-}"
+      SLACK_SIGNING_SECRET: "${SLACK_SIGNING_SECRET:-}"
+      OAUTH_TUNNEL_URL: "${OAUTH_TUNNEL_URL:-}"
+      WEB_SEARCH_API_KEY: "${WEB_SEARCH_API_KEY:-}"
       RUN_WORKER_INLINE: "${RUN_WORKER_INLINE:-1}"
       # Turn these on to watch partial results happen rather than infer them:
       #   SLOW_ADAPTER_SOURCE=slack SLOW_ADAPTER_DELAY_MS=8000 docker compose up -d api
@@ -95,6 +116,16 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://app:app@db:5432/app
       RUN_WORKER_INLINE: "0"
+      # The same surface as `api`, and for the same reason: the worker is what
+      # actually dispatches, so a keyring it cannot read is a send that can
+      # never leave. Empty by default.
+      TOKEN_KEYRING: "${TOKEN_KEYRING:-}"
+      TOKEN_KEYRING_PATH: "${TOKEN_KEYRING_PATH:-/secrets/keyring}"
+      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
+      GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
+      SLACK_CLIENT_ID: "${SLACK_CLIENT_ID:-}"
+      SLACK_CLIENT_SECRET: "${SLACK_CLIENT_SECRET:-}"
+      WEB_SEARCH_API_KEY: "${WEB_SEARCH_API_KEY:-}"
       FAKE_PROVIDER_LEDGER: /var/fake-provider/deliveries.jsonl
       # Set to a few thousand to watch a send sit in flight — and to make
       # "kill the worker mid-dispatch" a thing a person can actually do.
