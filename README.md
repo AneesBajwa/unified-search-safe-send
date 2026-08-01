@@ -251,12 +251,34 @@ The same reasoning is why the reconciliation probe reads
 `conversations.history` for one message id rather than pulling a channel: the
 narrowest read that answers "did this specific message post".
 
-### Test accounts
+### Test accounts, and what is deliberately not published here
 
-Use throwaway accounts. No reviewer is ever asked to connect a personal
-account — the app is fully explorable with zero connections, and seeded sends go
-to `TEST_RECIPIENT` (default `qa@example.test`; `.test` is reserved by RFC 6761
-and can never resolve).
+**Nothing here needs an account.** Sign in with any address, search, and browse
+seeded history in every state — the web adapter needs no grant and the seed
+dataset covers every terminal and non-terminal status. Connecting a provider
+adds live data; it is not the price of entry.
+
+Seeded sends go to `TEST_RECIPIENT` (default `qa@example.test`). `.test` is
+reserved by RFC 6761 and can never resolve, so a seeded row that somehow reached
+a provider still could not deliver.
+
+Development uses a **throwaway Gmail**, not a personal account.
+
+🔴 **Its password is deliberately not in this file, and that is not an
+oversight.** A shared Google login published in a public repository gets locked
+within days — Google flags sign-ins from many IPs as account compromise, and the
+reviewer who arrives after that has *worse* than no credentials. It would also
+be a live credential in a public repo, which is the exact thing the pre-commit
+hook and push protection exist to stop; making an exception by hand is how that
+habit starts.
+
+The path that actually works, and that the brief's requirement is really about —
+never asking a reviewer to connect something personal — is the one above:
+connect **your own** throwaway. The Google OAuth app is published to production
+(unverified), so any account can complete the flow through the
+**Advanced → Go to … (unsafe)** interstitial, and Slack ships as a manifest you
+install into your own workspace. Both take about a minute and neither shares a
+credential with anyone.
 
 ## Web search
 
