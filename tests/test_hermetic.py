@@ -120,15 +120,28 @@ def test_a_codespace_origin_is_derived_rather_than_configured() -> None:
     """
     from api.main import _cors_origins
 
-    assert not any(".app.github.dev" in origin for origin in _cors_origins())
-
-    os.environ["CODESPACE_NAME"] = "literate-spork-example"
-    os.environ["GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN"] = "app.github.dev"
+    # ⚠️ Both branches are driven explicitly. The first version asserted that no
+    # forwarded origin was present *before* setting anything — which is a claim
+    # about the ambient machine, not about the function, and it failed the
+    # moment the suite was run **inside a Codespace**. A test about Codespaces
+    # that only passes outside one is worse than no test: it would have told a
+    # reviewer running the documented setup that the app was broken.
+    keys = ("CODESPACE_NAME", "GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN")
+    previous = {name: os.environ.get(name) for name in keys}
     try:
+        for name in keys:
+            os.environ.pop(name, None)
+        assert not any(".app.github.dev" in origin for origin in _cors_origins())
+
+        os.environ["CODESPACE_NAME"] = "literate-spork-example"
+        os.environ["GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN"] = "app.github.dev"
         origins = _cors_origins()
     finally:
-        del os.environ["CODESPACE_NAME"]
-        del os.environ["GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN"]
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
 
     assert "https://literate-spork-example-5173.app.github.dev" in origins
     # The localhost pair still works, so `make dev` inside a Codespace does too.
