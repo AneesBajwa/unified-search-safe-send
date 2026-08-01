@@ -1,279 +1,1253 @@
 /*
- * Crude on purpose. Phase 5 polishes; this exists so the product loop is
- * clickable end to end. The one place effort went is `.confirm`, because a
- * cramped or ambiguous confirm step *is* the misfire this product prevents
- * (risks.md R13) — and mobile is where misfires happen, so these are
- * mobile-first with desktop added by media query.
+ * Layout and components.
+ *
+ * Mobile-first: everything here targets 375px and the media queries *add*
+ * desktop. Effort is deliberately unequal across surfaces (`risks.md` R13) — the
+ * gate at the bottom of this file is the most worked-on thing in the app, and
+ * compose is a stack of plain fields on purpose.
  */
 
+/* ------------------------------------------------------------------ shell */
+
 .app {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: saturate(140%) blur(10px);
+  border-bottom: 1px solid var(--line);
+  padding: 10px 16px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.topbar-bare {
+  grid-template-columns: 1fr;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.brand-mark {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  flex: none;
+  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 45%, var(--good)));
+}
+
+/* Hidden on a phone. The tab bar already says where you are, and the row has
+   exactly enough width for the one thing that changes — which account you are
+   signed in as. Shown again as soon as there is room. */
+.brand-name {
+  display: none;
+  font-weight: 650;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topbar-bare .brand-name {
+  display: inline;
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.identity {
+  font-size: 12px;
+  color: var(--fg-muted);
+  max-width: 52vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topnav {
+  display: none;
+}
+
+.app-main {
+  flex: 1;
+  width: 100%;
   max-width: 46rem;
   margin: 0 auto;
-  padding: 1rem;
+  padding: 16px 16px calc(84px + var(--safe-bottom));
 }
 
-.topbar h1 {
-  font-size: 1.1rem;
-  margin: 0 0 0.5rem;
+/* Bottom bar on a phone: every primary destination inside a thumb's reach. */
+.tabbar {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 20;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: saturate(140%) blur(10px);
+  border-top: 1px solid var(--line);
+  padding-bottom: var(--safe-bottom);
 }
 
-.topbar nav {
+.navlink {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  border-bottom: 1px solid #ddd;
-  padding-bottom: 0.5rem;
-  margin-bottom: 1rem;
-}
-
-.topbar nav a {
-  /* 44px minimum touch target. */
-  min-height: 44px;
-  display: inline-flex;
   align-items: center;
+  justify-content: center;
+  min-height: var(--tap);
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--fg-muted);
+  text-decoration: none;
 }
 
-.topbar nav a.active {
-  font-weight: 700;
+.navlink-on {
+  color: var(--accent);
 }
 
+.tabbar .navlink {
+  min-height: 52px;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tabbar .navlink-on {
+  box-shadow: inset 0 2px 0 0 var(--accent);
+}
+
+/* While the gate is open there is nowhere else to be. */
+.app[data-gate="open"] .tabbar,
+.app[data-gate="open"] .topbar {
+  display: none;
+}
+
+@media (min-width: 40rem) {
+  .topbar {
+    grid-template-columns: auto 1fr auto;
+    padding: 12px 24px;
+  }
+
+  .brand-name {
+    display: inline;
+  }
+
+  .topnav {
+    display: flex;
+    gap: 4px;
+    grid-row: 1;
+    grid-column: 2;
+    justify-content: center;
+  }
+
+  .topbar-right {
+    grid-row: 1;
+    grid-column: 3;
+  }
+
+  .topnav .navlink {
+    padding: 8px 14px;
+    border-radius: var(--radius);
+  }
+
+  .topnav .navlink-on {
+    background: var(--accent-weak);
+  }
+
+  .tabbar {
+    display: none;
+  }
+
+  .app-main {
+    padding: 24px 24px 64px;
+  }
+
+  .identity {
+    max-width: 18rem;
+  }
+}
+
+/* ------------------------------------------------------------ primitives */
+
+.page {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+
+.page-head {
+  display: grid;
+  gap: 6px;
+}
+
+.page-head h2 {
+  font-size: 22px;
+}
+
+.page-sub,
 .muted {
-  color: #666;
-  font-size: 0.85rem;
+  color: var(--fg-muted);
+  font-size: 13px;
 }
 
 .bad {
-  color: #a11;
+  color: var(--bad);
+  font-size: 13px;
 }
 
-.searchbar {
-  display: flex;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
-}
-
-.searchbar input {
-  flex: 1;
-  min-height: 44px;
-  padding: 0 0.5rem;
+.section-head {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-muted);
+  margin-top: 4px;
 }
 
 button,
 .button {
-  min-height: 44px;
-  padding: 0 0.9rem;
-  cursor: pointer;
-}
-
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+  -webkit-appearance: none;
+  appearance: none;
+  display: inline-flex;
   align-items: center;
-  margin-bottom: 1rem;
+  justify-content: center;
+  gap: 6px;
+  /* Never below the 44px floor — measured, not assumed (task 12.6). */
+  min-height: var(--tap);
+  padding: 0 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 550;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
 }
 
-.chip {
-  border: 1px solid #bbb;
-  border-radius: 999px;
-  padding: 0.2rem 0.6rem;
-  font-size: 0.8rem;
-  white-space: nowrap;
+button:disabled,
+.button:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
-/* "we looked and found nothing" and "we did not look" must never look alike. */
-.chip-done { border-color: #2a7; }
-.chip-running { border-color: #59f; font-style: italic; }
-.chip-failed { border-color: #a11; color: #a11; }
-.chip-reconnect { border-color: #d80; color: #a60; font-weight: 700; }
+.button-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
 
-.results {
-  display: grid;
-  gap: 0.75rem;
+.button-primary:not(:disabled):hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.button-danger {
+  background: var(--bad-weak);
+  border-color: color-mix(in srgb, var(--bad) 45%, transparent);
+  color: var(--bad);
+}
+
+.button-quiet {
+  min-height: var(--tap);
+  padding: 0 12px;
+  background: transparent;
+  border-color: transparent;
+  color: var(--accent);
+  font-size: 14px;
 }
 
 .card {
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  padding: 0.75rem;
-}
-
-.card header,
-.card footer {
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-  font-size: 0.8rem;
-}
-
-.card h3 {
-  margin: 0.35rem 0;
-  font-size: 1rem;
-}
-
-.snippet {
-  margin: 0 0 0.5rem;
-  font-size: 0.9rem;
-}
-
-.source {
-  font-weight: 700;
-  text-transform: uppercase;
-  font-size: 0.7rem;
-  letter-spacing: 0.05em;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 14px;
+  box-shadow: var(--shadow-1);
 }
 
 .rows {
   list-style: none;
   padding: 0;
+  margin: 0;
   display: grid;
-  gap: 0.4rem;
+  gap: 10px;
 }
 
-.rows li,
-.rows li a {
+.plain-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+
+.empty {
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-lg);
+  padding: 20px 16px;
+  display: grid;
+  gap: 6px;
+  text-align: center;
+}
+
+.empty-title {
+  font-weight: 600;
+}
+
+.empty-body {
+  color: var(--fg-muted);
+  font-size: 13px;
+  max-width: 34rem;
+  margin: 0 auto;
+}
+
+.load-more {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
-  min-height: 44px;
-}
-
-.row-title {
-  flex: 1;
-  min-width: 12rem;
-  overflow-wrap: anywhere;
+  justify-content: center;
+  padding: 4px 0 8px;
 }
 
 .badge {
-  border-radius: 4px;
-  padding: 0.1rem 0.4rem;
-  font-size: 0.75rem;
-  border: 1px solid currentColor;
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--pill);
+  padding: 2px 9px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  border: 1px solid currentcolor;
 }
 
-.badge-ok { color: #171; }
-.badge-bad { color: #a11; }
-.badge-flight { color: #36c; }
+.badge-ok {
+  color: var(--good);
+  background: var(--good-weak);
+}
+
+.badge-bad {
+  color: var(--bad);
+  background: var(--bad-weak);
+}
+
+.badge-flight {
+  color: var(--info);
+  background: var(--info-weak);
+}
+
 /* Amber, not red. Failed means we know nothing was sent; uncertain means we do
    not know, and conflating them invites exactly the wrong action. */
-.badge-doubt { color: #d18b00; background: rgba(209, 139, 0, 0.12); }
-.badge-seed { color: #666; }
-
-.compose {
-  display: grid;
-  gap: 0.75rem;
-  max-width: 34rem;
+.badge-doubt {
+  color: var(--warn);
+  background: var(--warn-weak);
 }
 
-.compose label {
-  display: grid;
-  gap: 0.25rem;
+.badge-seed {
+  color: var(--fg-muted);
+  background: var(--surface-2);
+  border-color: var(--line-strong);
+  font-weight: 500;
 }
 
-.compose input,
-.compose select,
-.compose textarea {
-  min-height: 44px;
-  padding: 0.4rem;
+/* --------------------------------------------------------------- notices */
+
+.notices {
+  display: grid;
+  gap: 10px;
+}
+
+.notice {
+  display: grid;
+  gap: 10px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  padding: 14px;
+}
+
+.notice-body {
+  display: grid;
+  gap: 4px;
+}
+
+.notice-title {
+  font-weight: 620;
+  font-size: 15px;
+}
+
+.notice-detail {
+  font-size: 13px;
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+
+.notice-meta {
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+
+.notice-bad {
+  border-color: color-mix(in srgb, var(--bad) 35%, var(--line));
+  background: var(--bad-weak);
+}
+
+.notice-bad .notice-title {
+  color: var(--bad);
+}
+
+.notice-warn {
+  border-color: color-mix(in srgb, var(--warn) 35%, var(--line));
+  background: var(--warn-weak);
+}
+
+.notice-warn .notice-title {
+  color: var(--warn);
+}
+
+.notice-info {
+  border-color: color-mix(in srgb, var(--info) 35%, var(--line));
+  background: var(--info-weak);
+}
+
+/* An action, not an error. It gets the accent, not the alarm. */
+.notice-action {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: var(--accent-weak);
+}
+
+.notice-cta {
+  justify-self: start;
+}
+
+/* ----------------------------------------------------------------- search */
+
+.searchbar {
+  display: flex;
+  gap: 8px;
+  position: sticky;
+  top: 56px;
+  z-index: 10;
+  background: var(--bg);
+  padding: 4px 0 8px;
+}
+
+.searchbar input {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--tap);
+  padding: 0 12px;
   font: inherit;
+  font-size: 16px; /* 16px or iOS zooms the page on focus. */
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
 }
 
-/* ---------------------------------------------------------------- confirm */
-
-.confirm .destination {
-  font-size: 1.15rem;
-  font-weight: 700;
-  line-height: 1.35;
-  margin: 0.5rem 0 0.75rem;
-}
-
-.destination-detail {
+.search-summary {
   display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.25rem 0.75rem;
-  margin: 0 0 1rem;
-  font-size: 0.9rem;
+  gap: 4px;
 }
 
-.destination-detail dt { color: #666; }
-.destination-detail dd { margin: 0; overflow-wrap: anywhere; }
+.search-query {
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+}
 
-/* The full body, scrollable, never truncated: a customer cannot confirm what
-   they cannot read. */
+.search-progress {
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+
+.search-footer {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 4px 12px;
+  border-radius: var(--pill);
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  font-size: 13px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.chip-source {
+  font-weight: 620;
+}
+
+.chip-value {
+  color: var(--fg-muted);
+}
+
+.chip-mode {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 1px 6px;
+  border-radius: var(--pill);
+  background: var(--surface-3);
+  color: var(--fg-muted);
+}
+
+/* The four terminal states must never collapse into each other. */
+.chip-done {
+  border-color: color-mix(in srgb, var(--good) 50%, var(--line));
+  background: var(--good-weak);
+}
+
+.chip-done .chip-value {
+  color: var(--good);
+  font-weight: 650;
+}
+
+.chip-empty {
+  border-color: var(--line-strong);
+  background: var(--surface-2);
+}
+
+.chip-failed {
+  border-color: color-mix(in srgb, var(--bad) 50%, var(--line));
+  background: var(--bad-weak);
+}
+
+.chip-failed .chip-value {
+  color: var(--bad);
+  font-weight: 620;
+}
+
+.chip-retrying {
+  border-color: color-mix(in srgb, var(--warn) 50%, var(--line));
+  background: var(--warn-weak);
+}
+
+.chip-retrying .chip-value {
+  color: var(--warn);
+  font-weight: 620;
+}
+
+.chip-running {
+  border-color: color-mix(in srgb, var(--info) 45%, var(--line));
+  background: var(--info-weak);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.ellipsis::after {
+  content: "…";
+}
+
+/* An action reads as an action: accent, a verb, and a real touch target. */
+.chip-action {
+  min-height: var(--tap);
+  padding: 0 14px;
+  border-color: var(--accent);
+  background: var(--accent-weak);
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.chip-action .chip-verb {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.results {
+  display: grid;
+  gap: 10px;
+}
+
+.result-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.result-source {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-muted);
+}
+
+.result-time {
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+
+.result-title {
+  font-size: 16px;
+  margin: 6px 0 4px;
+  overflow-wrap: anywhere;
+}
+
+.result-snippet {
+  font-size: 14px;
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+
+.result-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.result-author {
+  font-size: 12px;
+  color: var(--fg-faint);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.result-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+/* ------------------------------------------------------------ connections */
+
+.rows-cards {
+  gap: 12px;
+}
+
+.connection {
+  display: grid;
+  gap: 8px;
+}
+
+.connection-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.connection-name {
+  font-weight: 640;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+  min-width: 0;
+  flex: 1;
+}
+
+.connection-meta {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.connection-detail {
+  font-size: 13px;
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+
+.connection-notice {
+  margin-top: 2px;
+}
+
+.connection-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.rationale {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  background: var(--surface-2);
+  font-size: 13px;
+}
+
+/* A disclosure triangle is a control, so it is measured against the same 44px
+   floor as everything else — the default is about 24px, which is a miss on a
+   phone. */
+.rationale summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  min-height: var(--tap);
+  color: var(--fg-muted);
+  font-weight: 550;
+}
+
+.rationale p {
+  margin-top: 8px;
+  color: var(--fg-muted);
+  line-height: 1.5;
+}
+
+/* ---------------------------------------------------------------- history */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.segmented {
+  display: inline-flex;
+  padding: 3px;
+  gap: 3px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+
+.segment {
+  min-height: var(--tap);
+  padding: 0 16px;
+  border: 0;
+  background: transparent;
+  border-radius: 7px;
+  font-size: 14px;
+  color: var(--fg-muted);
+}
+
+.segment-on {
+  background: var(--surface);
+  color: var(--fg);
+  box-shadow: var(--shadow-1);
+}
+
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--tap);
+  font-size: 13px;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.switch input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--accent);
+}
+
+.row-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.row-link {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  color: inherit;
+  text-decoration: none;
+  min-height: var(--tap);
+}
+
+.row-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.row-time {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+
+.row-title {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.row-sub {
+  font-size: 13px;
+  color: var(--fg-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.row-meta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.row-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 8px 8px;
+}
+
+.countdown {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.countdown-waiting {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.countdown-checking {
+  color: var(--info);
+  font-weight: 600;
+}
+
+.countdown-backoff,
+.countdown-sep {
+  font-weight: 400;
+  color: var(--fg-faint);
+}
+
+/* ----------------------------------------------------------- send detail */
+
+.detail-head {
+  gap: 4px;
+}
+
+.detail-state {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.detail-recipient {
+  font-size: 22px;
+  overflow-wrap: anywhere;
+}
+
+.detail-subject {
+  font-size: 14px;
+  font-weight: 550;
+}
+
+.facts {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.fact {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+
+.fact:last-child {
+  border-bottom: 0;
+}
+
+.fact dt {
+  color: var(--fg-muted);
+}
+
+.fact dd {
+  margin: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.detail-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* The full body, scrollable, never truncated: a customer cannot confirm — or
+   audit — what they cannot read. Translucent grey rather than a fixed
+   near-white, so it works in both colour schemes. */
 .body-preview {
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
   max-height: 40vh;
   overflow-y: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  /* Translucent grey rather than a fixed near-white: the page follows the
-     system colour scheme, and a hardcoded light background put light text on
-     light and made the body unreadable — in the one component whose entire
-     requirement is that the customer can read the body before confirming. */
-  background: rgba(127, 127, 127, 0.12);
+  background: var(--surface-2);
   color: inherit;
-}
-
-.confirm-actions {
-  display: flex;
-  flex-direction: column;
-  margin-top: 1.25rem;
-}
-
-.confirm-actions .primary {
-  font-weight: 700;
-  min-height: 52px;
-}
-
-/* Confirm and Cancel are never adjacent. On a phone that gap is the whole
-   defence against a mistap. */
-.confirm-actions .gap {
-  height: 24px;
-}
-
-.confirm-actions .cancel {
-  width: 100%;
-  min-height: 48px;
-}
-
-.digest { margin-top: 1rem; overflow-wrap: anywhere; }
-
-.sent {
-  border: 1px solid #2a7;
-  border-radius: 6px;
-  padding: 0.6rem;
-  margin-top: 0.75rem;
-}
-
-.doubt {
-  border: 1px solid #d90;
-  background: rgba(217, 153, 0, 0.1);
-  border-radius: 6px;
-  padding: 0.75rem;
-  margin: 1rem 0;
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-overflow-scrolling: touch;
 }
 
 .error-detail {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  overflow-x: auto;
-  background: rgba(127, 127, 127, 0.12);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
   color: inherit;
-  padding: 0.6rem;
-  border-radius: 4px;
-  font-size: 0.8rem;
+  padding: 12px;
+  border-radius: var(--radius);
+  font-size: 12.5px;
+  margin: 0;
+  max-height: 50vh;
+  overflow: auto;
 }
 
-.empty { padding: 1rem 0; }
+.doubt {
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line));
+  background: var(--warn-weak);
+  border-radius: var(--radius-lg);
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.doubt-title {
+  font-size: 16px;
+  color: var(--warn);
+}
+
+.doubt-lede {
+  font-size: 14px;
+}
+
+.doubt-reason,
+.doubt-help {
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+
+.doubt-verify {
+  width: 100%;
+  background: transparent;
+  border-color: color-mix(in srgb, var(--warn) 55%, var(--line));
+  color: var(--warn);
+}
+
+.doubt-actions {
+  display: grid;
+  gap: 12px;
+}
+
+.doubt-choice {
+  display: grid;
+  gap: 4px;
+}
+
+.doubt-choice .button {
+  width: 100%;
+}
+
+/* --------------------------------------------------------------- compose */
+
+.compose {
+  display: grid;
+  gap: 12px;
+}
+
+.field {
+  display: grid;
+  gap: 5px;
+}
+
+.field-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.compose input,
+.compose select,
+.compose textarea,
+.field input {
+  min-height: var(--tap);
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 16px; /* Below 16px iOS zooms on focus and the layout jumps. */
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+  width: 100%;
+}
+
+.compose textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.signin {
+  max-width: 26rem;
+}
+
+/* ============================================================== THE GATE ==
+
+   The highest-value component in the app. A cramped or ambiguous confirm step
+   *is* the misfire this product exists to prevent, so it gets the whole screen
+   on a phone and the layout is a fixed three-row grid: the destination never
+   scrolls away, the body owns the only scrolling region, and the actions are
+   always where the thumb expects them.
+   ========================================================================= */
+
+.gate {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--bg);
+  display: grid;
+}
+
+.gate-sheet {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  min-height: 0;
+  background: var(--surface);
+}
+
+.gate-loading {
+  display: grid;
+  gap: 12px;
+  align-content: center;
+  justify-items: center;
+  padding: 24px;
+  text-align: center;
+}
+
+.gate-head {
+  padding: 14px 18px 12px;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 3px;
+}
+
+.gate-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+/* 1. The destination is the most prominent element on the screen. Verbatim —
+      never a friendly alias that could hide the real recipient. */
+.gate-destination {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+
+.gate-warning {
+  font-size: 13.5px;
+  color: var(--fg);
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+
+.gate-via {
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+
+.gate-channel {
+  text-transform: capitalize;
+  font-weight: 600;
+}
+
+.gate-subject {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.gate-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+/* 2. The only scrolling region. */
+.gate-scroll {
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 12px 18px 16px;
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.gate-body-label {
+  margin-bottom: -4px;
+}
+
+.gate-scroll .body-preview {
+  max-height: none;
+  overflow: visible;
+}
+
+.gate-digest {
+  font-size: 12px;
+  color: var(--fg-faint);
+  overflow-wrap: anywhere;
+}
+
+.gate-error {
+  margin-top: 2px;
+}
+
+/* 3 and 4. Distinct, separated, and never adjacent. */
+.gate-actions {
+  padding: 14px 18px calc(16px + var(--safe-bottom));
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  display: grid;
+}
+
+.gate-confirm {
+  min-height: 54px;
+  font-size: 17px;
+  font-weight: 700;
+  width: 100%;
+}
+
+/* The gap *is* the defence. On a phone a thumb reaching for Cancel must not be
+   able to land on Send. */
+.gate-gap {
+  height: 24px;
+}
+
+.button-cancel {
+  width: 100%;
+  min-height: 48px;
+  background: transparent;
+  border-color: var(--line-strong);
+  color: var(--fg-muted);
+  font-weight: 550;
+}
+
+.gate-settled {
+  display: grid;
+}
+
+.gate-settled-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.gate-settled-id {
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.gate-settled-note {
+  font-size: 13px;
+  color: var(--fg-muted);
+  margin-bottom: 12px;
+}
 
 @media (min-width: 40rem) {
-  .confirm-actions {
-    flex-direction: row-reverse;
-    justify-content: flex-start;
+  .gate {
+    background: rgb(10 12 16 / 55%);
+    place-items: center;
+    padding: 24px;
   }
-  .confirm-actions .gap { width: 24px; height: auto; }
-  .confirm-actions .cancel { width: auto; }
+
+  .gate-sheet {
+    width: min(34rem, 100%);
+    max-height: min(46rem, 100%);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow-2);
+    overflow: hidden;
+  }
+
+  .gate-actions {
+    grid-auto-flow: column;
+    justify-content: flex-end;
+    align-items: center;
+  }
+
+  .gate-confirm {
+    width: auto;
+    min-width: 11rem;
+    order: 3;
+  }
+
+  .gate-gap {
+    height: auto;
+    width: 24px;
+    order: 2;
+  }
+
+  .button-cancel {
+    width: auto;
+    min-width: 8rem;
+    order: 1;
+  }
+
+  .gate-settled {
+    grid-auto-flow: row;
+  }
 }

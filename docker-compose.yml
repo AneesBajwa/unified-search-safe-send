@@ -103,7 +103,16 @@ services:
     working_dir: /app
     command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
     environment:
-      VITE_API_BASE_URL: http://localhost:8080
+      # Deliberately unset. `apps/web/src/api/client.ts` falls back to the
+      # page's own hostname on port 8080, so the same dev server works from
+      # `localhost` and from a phone on the LAN with no rebuild. Pinning it to
+      # `http://localhost:8080` means a phone calls *itself*, which presents as
+      # every request failing for no visible reason — the classic afternoon
+      # loser when checking the confirm step on real glass.
+      #
+      # Set it explicitly when the API is somewhere else (Cloud Run, a tunnel):
+      #   VITE_API_BASE_URL=https://api.example.com docker compose up -d web
+      VITE_API_BASE_URL: "${VITE_API_BASE_URL:-}"
     ports:
       - "5173:5173"
     volumes:
