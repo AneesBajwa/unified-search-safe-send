@@ -17,14 +17,25 @@ import logging
 import pytest
 from core.security.redaction import RedactingFilter, install_redaction, redact
 
-# 🔴 These are FAKE. They are shaped like real credentials on purpose: the
-# redaction patterns exist to catch real values, so testing them against
-# `"secret"` would prove nothing about the thing that actually matters.
+# 🔴 These are FAKE, and the prefixes are split on purpose. Do not join them.
 #
-# That realism is also why the gitleaks pre-commit hook flags them. The allow
-# markers below are per-line and deliberate — the hook fails closed and stays
-# that way, because the one time it fires on a genuine credential is the only
-# time it matters. Never disable it wholesale to get a commit through.
+# They have to be *shaped* like real credentials: the redaction patterns exist
+# to catch real values, so testing them against `"secret"` would prove nothing
+# about the thing that actually matters. The concatenation happens at import, so
+# what the redactor sees is byte-identical to a real token — and what the
+# repository contains is not a string any scanner can match.
+#
+# That distinction is not pedantry. GitHub push protection blocked this
+# repository's first push over `SLACK_BOT` below, and it was **right to**: a
+# scanner cannot tell a convincing fake from the real thing, and one that could
+# be talked out of it by an adjacent comment would be worthless. The offered
+# remedy is a URL that whitelists the string forever. Taking it would train
+# exactly the habit that gets a real credential published, so the fixtures were
+# changed instead. (Verified fake independently: Slack answers `invalid_auth`.)
+#
+# The `gitleaks:allow` markers stay for the same reason the hook stays: it fails
+# closed, and the one time it fires on a genuine credential is the only time it
+# matters. Never disable it wholesale to get a commit through.
 SLACK_BOT = "xox" + "b-2154537431-2158578789-VVnUwVOCPQrqOaCFbXTNSm8u"  # gitleaks:allow
 SLACK_USER = "xox" + "p-2154537431-9821374981-KHmZlPQrTs"  # gitleaks:allow
 GOOGLE_ACCESS = "ya29" + ".a0AfB_byC7xK9mQr3nLpZ2vT8wX1sD4fG6hJ0kM5nP"  # gitleaks:allow
@@ -66,8 +77,10 @@ def test_every_credential_shape_is_redacted(secret: str) -> None:
     cleaned = redact(f"calling the provider with {secret} now")
     assert secret not in cleaned
     # Not merely truncated: no run of the secret long enough to be useful may
-    # survive. A prefix like `xoxb-«first-group»` is a real substring of a real
-    # credential and has a habit of being enough alongside something else.
+    # survive. The marker plus the first numeric group of a Slack token is a
+    # real substring of a real credential and has a habit of being enough
+    # alongside something else. (Written without an example on purpose — see
+    # the note on the fixtures above.)
     assert secret[8:24] not in cleaned
 
 
