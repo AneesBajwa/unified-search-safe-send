@@ -6,13 +6,24 @@ continuously by us instead of once by them at the end. It grows a step per phase
 today it is the whole product loop:
 
     health -> mint a key -> search -> poll until every source is terminal
+           -> read results, rerun, page the listings
+           -> create and revoke an API key
+           -> confirm another user gets 404, never 403
            -> create a draft -> send -> **send again with the same key**
            -> assert one delivery, one provider_message_id, idempotent_replay
+           -> read history and its detail
+           -> the connection round trip
 
-The assertions that matter are the last three. Two calls, one message. The
-second call returns the *same* `provider_message_id` rather than a new one, and
-says so with `idempotent_replay: true`. If any of that stops being true the send
-gate is broken, whatever the tests say.
+The assertions that matter most are the idempotency ones. Two calls, one
+message. The second call returns the *same* `provider_message_id` rather than a
+new one, and says so with `idempotent_replay: true`. If any of that stops being
+true the send gate is broken, whatever the tests say.
+
+🔴 **Everything up to the draft runs in both modes.** The delivery leg needs a
+real OAuth grant and is skipped loudly without `--api-key`; the read surface,
+the key lifecycle and the isolation check do not, so they are deliberately
+ordered *before* the skip. A check that only runs on the path a reviewer may
+never take is a check that is not really run.
 
 Nothing here nudges the worker: if the jobs complete, a background worker claimed
 and ran them, which is the durable-background-work requirement demonstrated
@@ -24,6 +35,7 @@ Usage:  python scripts/smoke.py [--base-url http://localhost:8080]
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
 
@@ -66,7 +78,14 @@ def main() -> int:
     args = parser.parse_args()
 
     started = time.monotonic()
-    with httpx.Client(base_url=args.base_url, timeout=15.0) as client:
+    # ⚠️ 45s, not 15. Locally the API runs the worker **inline**
+    # (RUN_WORKER_INLINE=1) and the engine has `pool_size=5, max_overflow=0`,
+    # so a full batch of live adapter runs can hold every connection while it
+    # talks to Gmail and Slack — and an HTTP request then waits for the pool
+    # rather than for the database. Measured idle latency on these routes is
+    # ~8ms; the wait is contention, not slowness. Not a production concern:
+    # on Cloud Run the worker is its own service and does not share this pool.
+    with httpx.Client(base_url=args.base_url, timeout=45.0) as client:
         # 1. The API is up and its database round trip works.
         health = client.get("/health")
         check(health.status_code == 200, f"/health returned {health.status_code}: {health.text}")
@@ -125,7 +144,14 @@ def main() -> int:
             check(not extra, f"a result carries keys outside the closed shape: {extra}")
         print(f"✓ results        {len(snapshot['results'])} merged · {statuses}")
 
-        # 5. A draft. No provider is contacted.
+        # 5. The rest of the read surface (task group 9), before the delivery
+        #    leg — none of it needs a connection, so it runs in **both** smoke
+        #    modes rather than only the one a reviewer may never take.
+        _check_read_surface(client, auth, search["search_id"])
+        _check_key_lifecycle(client, auth)
+        _check_isolation(client, search["search_id"])
+
+        # 6. A draft. No provider is contacted.
         #
         # Which channel depends on what is actually connected. A fresh user with
         # every provider configured has no grant and therefore no connection —
@@ -166,7 +192,7 @@ def main() -> int:
         recipient = draft["confirmation"]["recipient_display"]
         print(f"✓ draft          {recipient} · digest {digest[:12]}…")
 
-        # 6. No digest, no send. The absence of a recipient+body route is the
+        # 7. No digest, no send. The absence of a recipient+body route is the
         #    feature; this is the same rule at the level of one call.
         refused = client.post(f"/v1/drafts/{draft['draft']['id']}/send", json={}, headers=auth)
         check(
@@ -179,7 +205,7 @@ def main() -> int:
         )
         print("✓ gate           a send with no confirmation is refused")
 
-        # 7. The send.
+        # 8. The send.
         first = client.post(
             f"/v1/drafts/{draft['draft']['id']}/send",
             json={"confirmed_sha256": digest},
@@ -195,7 +221,7 @@ def main() -> int:
         )
         print(f"✓ sent           {send_id} · {delivered['provider_message_id']}")
 
-        # 8. The same key again. One message, same evidence, and the API says
+        # 9. The same key again. One message, same evidence, and the API says
         #    plainly that this was a replay.
         second = client.post(
             f"/v1/drafts/{draft['draft']['id']}/send",
@@ -220,12 +246,23 @@ def main() -> int:
         check(replay["attempts"] == delivered["attempts"], "the duplicate cost an extra attempt")
         print(f"✓ idempotent     same send, same message id, replay={replay['idempotent_replay']}")
 
-        # 9. And it is one row, from the outside.
+        # 10. And it is one row, from the outside.
         history = client.get("/v1/sends", headers=auth).json()["sends"]
         matching = [row for row in history if row["send_id"] == send_id]
         check(len(matching) == 1, f"expected one send in history, found {len(matching)}")
 
-        # 10. The connection round trip (task group 6). Which half runs depends
+        # 10b. Detail carries what was transmitted, not a summary. This is the
+        #     record a customer checks when they want to know what went out.
+        detail = client.get(f"/v1/sends/{send_id}", headers=auth).json()
+        check(
+            detail["body"] == "Confirming for Thursday.",
+            "send detail does not carry the exact body that was transmitted",
+        )
+        check(detail["is_seed"] is False, "a real send is badged as seed data")
+        retryable = detail["retryable_by_operator"]
+        print(f"✓ history        1 row · body preserved · retryable={retryable}")
+
+        # 11. The connection round trip (task group 6). Which half runs depends
         #     on whether an OAuth client is configured — and *that distinction is
         #     itself asserted*, so "it is configured but silently mocked" cannot
         #     pass unnoticed.
@@ -233,6 +270,118 @@ def main() -> int:
 
     print(f"\nSMOKE PASSED in {time.monotonic() - started:.1f}s")
     return 0
+
+
+def _check_read_surface(
+    client: httpx.Client, auth: dict[str, str], search_id: str
+) -> None:
+    """The results, rerun and paging routes, exercised rather than listed.
+
+    A route that exists and answers 500 is worse than one that does not exist:
+    the console offers the action, and the user learns the product is unreliable
+    rather than that a feature is missing.
+    """
+    results = client.get(f"/v1/searches/{search_id}/results", headers=auth)
+    check(results.status_code == 200, f"results route failed: {results.text}")
+    check(results.json()["finished"] is True, "a finished search reports finished=false")
+    allowed = {"source", "id", "title", "snippet", "author", "timestamp", "url"}
+    for result in results.json()["results"]:
+        extra = set(result) - allowed
+        check(not extra, f"a result carries keys outside the closed shape: {extra}")
+
+    rerun = client.post(f"/v1/searches/{search_id}/rerun", headers=auth)
+    check(rerun.status_code == 202, f"rerun failed: {rerun.text}")
+    check(
+        rerun.json()["search_id"] != search_id,
+        "rerun overwrote the original search instead of creating a new one",
+    )
+
+    # Paging, walked rather than sampled: the failure it prevents is a row seen
+    # twice or skipped across a boundary, which page one alone cannot show.
+    #
+    # ⚠️ Both walks are bounded and the bounds must agree, because this script
+    # runs against the **same user** every time and that user's history grows by
+    # three searches per run. The first version read `?limit=100` and walked at
+    # most 50 single-row pages: once the user had more than 50 searches the walk
+    # stopped early, the two lists differed, and it failed with "paging one row
+    # at a time did not reproduce the full listing" — which reads as a paging
+    # bug in the API and was nothing of the sort.
+    #
+    # So: walk a fixed number of rows and compare against exactly that many.
+    # A boundary error still shows up as a duplicate or a gap inside the window.
+    window = 20
+    everything = client.get(f"/v1/searches?limit={window}", headers=auth).json()
+    expected = [row["search_id"] for row in everything["searches"]]
+    walked: list[str] = []
+    cursor: str | None = None
+    while len(walked) < len(expected):
+        url = "/v1/searches?limit=1" + (f"&cursor={cursor}" if cursor else "")
+        page = client.get(url, headers=auth).json()
+        walked.extend(row["search_id"] for row in page["searches"])
+        cursor = page["next_cursor"]
+        if cursor is None:
+            break
+    check(
+        walked == expected,
+        "paging one row at a time did not reproduce the full listing",
+    )
+    check(
+        (everything["next_cursor"] is None) == (len(expected) < window),
+        "the listing offered a cursor on its last page, or withheld one mid-history",
+    )
+    check(len(walked) == len(set(walked)), "a row appeared on two pages")
+    print(f"✓ read surface   results · rerun · {len(walked)} rows paged cleanly")
+
+
+def _check_key_lifecycle(client: httpx.Client, auth: dict[str, str]) -> None:
+    """Create, use, list, revoke — and the property revocation is *for*.
+
+    A revoked key must fail **identically** to a key that never existed.
+    Anything else is a free oracle telling whoever is probing which keys are real.
+    """
+    created = client.post("/v1/api-keys", json={"name": "smoke"}, headers=auth)
+    check(created.status_code == 201, f"key creation failed: {created.text}")
+    minted = created.json()
+    second = {"X-API-Key": minted["key"]}
+    check(client.get("/v1/sends", headers=second).status_code == 200, "a fresh key was refused")
+
+    listed = client.get("/v1/api-keys", headers=auth).json()["api_keys"]
+    check(
+        minted["key"] not in json.dumps(listed),
+        "the plaintext key appears in a listing — it is meant to exist once, at creation",
+    )
+
+    revoked = client.delete(f"/v1/api-keys/{minted['key_id']}", headers=auth)
+    check(revoked.status_code == 200, f"revocation failed: {revoked.text}")
+    after = client.get("/v1/sends", headers=second)
+    unknown = client.get("/v1/sends", headers={"X-API-Key": "sk_live_" + "a" * 60})
+    check(after.status_code == 401, "a revoked key still works")
+    check(
+        after.json() == unknown.json(),
+        "a revoked key answers differently from an unknown one, which discloses "
+        "which keys are real",
+    )
+    print(f"✓ api keys       {minted['prefix_display']} created · used · revoked")
+
+
+def _check_isolation(client: httpx.Client, search_id: str) -> None:
+    """Another user's resource is `404`, never `403` — existence is not disclosed."""
+    stranger = client.post(
+        "/v1/auth/dev-login", json={"email": "stranger@example.test"}
+    )
+    check(stranger.status_code == 201, f"could not mint a second user: {stranger.text}")
+    theirs = {"X-API-Key": stranger.json()["key"]}
+
+    response = client.get(f"/v1/searches/{search_id}", headers=theirs)
+    check(
+        response.status_code == 404,
+        f"another user's search answered {response.status_code}, not 404",
+    )
+    check(
+        response.json()["error"]["code"] == "not_found",
+        f"unexpected code for a cross-user read: {response.json()}",
+    )
+    print("✓ isolation      another user's resources are 404, never 403")
 
 
 def _send_target(

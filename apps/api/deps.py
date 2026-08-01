@@ -41,12 +41,7 @@ def _unauthorized() -> ApiError:
     exception keeps a reference to its traceback, and a shared one would pin
     request frames for the life of the process.
     """
-    return ApiError(
-        "unauthorized",
-        "a valid X-API-Key header is required",
-        status=401,
-        classification="permanent",
-    )
+    return ApiError("unauthorized", "a valid X-API-Key header is required")
 
 
 @dataclass(frozen=True)

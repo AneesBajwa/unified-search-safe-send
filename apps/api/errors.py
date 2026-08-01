@@ -1,9 +1,4 @@
-"""The error envelope (part of openspec task 9.3 — deliberately partial).
-
-Group 9 owns the full catalog. What is here is what group 5 *fixes*: the send
-gate's own status codes and machine-readable codes are part of its contract, not
-presentation, so they land with the gate rather than waiting for the group that
-formalises everything else.
+"""The error envelope, and the one place a code is turned into a response.
 
 Shape is `application/problem+json`-ish, always carrying a ``code`` and a
 ``classification`` so a client can decide whether retrying is meaningful without
@@ -14,6 +9,20 @@ parsing prose:
 The ``config`` classification is why this is worth structuring at all: a rotated
 client secret must never render as "reconnect your account", which sends the
 user round in circles fixing a grant that was never broken (risks.md R24).
+
+🔴 **Status and classification are looked up, never passed** (task 9.11).
+``ApiError`` takes a code and a message; everything else comes from
+``catalog.py``. Before this, each raise site restated its own status, and one of
+them disagreed — ``confirmation_required`` was 422 at the send gate and 409 when
+refusing to retry an in-doubt send, which is a code no client can branch on. A
+code that is not in the catalog now raises at the raise site rather than
+reaching a client.
+
+``SendGateError`` comes out of ``core``, which cannot import a web framework (the
+import-linter contract) and therefore cannot import the catalog either — it
+carries its own status. ``test_error_catalog.py`` drives every gate refusal
+through HTTP and asserts the two agree, so the duplication is checked rather
+than trusted.
 """
 
 from __future__ import annotations
@@ -23,6 +32,8 @@ from typing import Any
 from core.send.service import SendGateError
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+
+from api import catalog
 
 
 def envelope(
@@ -38,22 +49,20 @@ def envelope(
 
 
 class ApiError(Exception):
-    """Anything the API refuses, in the documented shape."""
+    """Anything the API refuses, in the documented shape.
 
-    def __init__(
-        self,
-        code: str,
-        message: str,
-        *,
-        status: int = 400,
-        classification: str = "permanent",
-        **extra: Any,
-    ) -> None:
+    ``**extra`` carries the fields only some codes have — ``reconnect_url`` on a
+    revoked grant, ``retry_after`` on a throttle. Absent values are dropped, so
+    a client never has to distinguish "null" from "not applicable".
+    """
+
+    def __init__(self, code: str, message: str, **extra: Any) -> None:
         super().__init__(message)
+        spec = catalog.spec(code)
         self.code = code
         self.message = message
-        self.status = status
-        self.classification = classification
+        self.status = spec.status
+        self.classification = spec.classification
         self.extra = extra
 
     def body(self) -> dict[str, Any]:
@@ -73,6 +82,16 @@ def install(app: FastAPI) -> None:
         # import-linter contract). Translating here is the price of that
         # boundary, and it is one function.
         return JSONResponse(
-            envelope(exc.code, exc.message, classification=exc.classification),
+            envelope(
+                exc.code,
+                exc.message,
+                classification=exc.classification,
+                # `action_url` under both names, exactly as the search snapshot
+                # does: `reconnect_url` is the older one and clients already
+                # read it, so dropping it silently would break the one repair a
+                # revoked grant has.
+                action_url=exc.action_url,
+                reconnect_url=exc.action_url,
+            ),
             status_code=exc.status,
         )

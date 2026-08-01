@@ -4,6 +4,8 @@
 #
 #   make dev     stack up, migrated, API + SPA reachable
 #   make test    the full suite against a testcontainers Postgres 17
+#   make seed    the demo dataset — every status, idempotent
+#   make schema  regenerate the console's types from OpenAPI
 #   make smoke   end to end through the REST API, no UI involved
 #   make image   the linux/amd64 image builds AND serves /health
 #   make deploy  Cloud Run — blocked on billing, and says so loudly
@@ -22,8 +24,8 @@ IMAGE     ?= unified-search-safe-send:amd64
 PGURL     ?= postgresql://app:app@localhost:5433/app
 COMPOSE_NET ?= unified-search-safe-send_default
 
-.PHONY: help dev up down logs migrate seed test lint fmt typecheck contracts \
-        smoke image deploy psql clean
+.PHONY: help dev up down logs migrate seed schema test lint fmt typecheck contracts \
+        web smoke image deploy psql clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -57,6 +59,9 @@ migrate: ## alembic upgrade head against DATABASE_URL (defaults to local compose
 seed: ## Idempotent seed data — re-running replaces rather than duplicates
 	uv run python scripts/seed.py
 
+schema: ## Regenerate apps/web/src/api/schema.d.ts from OpenAPI. NEVER hand-edit it
+	uv run python scripts/gen_schema.py
+
 psql: ## Open a psql shell on the local database
 	PGPASSWORD=app psql -h localhost -p 5433 -U app -d app
 
@@ -78,6 +83,13 @@ typecheck: ## mypy --strict
 
 contracts: ## Just the module-boundary contracts (core imports nothing from apps)
 	uv run lint-imports
+
+web: ## The console's own checks: typecheck, lint, and the SourceStatusChip unit tests
+	@# Separate from `test` because it is a different toolchain, and because the
+	@# console's boundary is *also* checked from the Python side —
+	@# `tests/test_web_boundary.py` greps apps/web for locally-derived decisions
+	@# and runs as part of `make test` with no node involved.
+	cd apps/web && npm run typecheck && npm run lint && npm test
 
 smoke: ## End to end through the REST API with no UI running
 	uv run python scripts/smoke.py --base-url $(API_URL)
