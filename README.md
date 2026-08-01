@@ -102,9 +102,22 @@ Requires Docker (or Colima) and nothing else.
 
 ```bash
 cp .env.example .env
+
+# 🔴 Generate a token-encryption key. This is a real step, not boilerplate:
+# every route that touches a credential — including the OAuth authorize call —
+# signs or encrypts with it, and there is deliberately no plaintext fallback
+# and no generate-if-missing path (`risks.md` R9). A key that appeared by magic
+# would mean a later restart silently could not decrypt what an earlier one
+# wrote. Without it the first thing you click answers `internal_config_error`,
+# which is *our* fault and says so.
+python3 -c 'import os,base64;print("TOKEN_KEYRING="+base64.b64encode(os.urandom(32)).decode())' >> .env
+
 docker compose up --build
 make seed                        # the demo dataset — see below
 ```
+
+In a Codespace the key is generated for you at container create — the container
+is disposable and so is the key.
 
 - API — http://localhost:8080/health
 - Worker — http://localhost:8081/health

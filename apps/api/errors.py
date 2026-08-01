@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.security.crypto import KeyringUnavailable
 from core.send.service import SendGateError
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -75,6 +76,26 @@ def install(app: FastAPI) -> None:
     @app.exception_handler(ApiError)
     async def _api_error(_request: Request, exc: ApiError) -> JSONResponse:
         return JSONResponse(exc.body(), status_code=exc.status)
+
+    @app.exception_handler(KeyringUnavailable)
+    async def _no_keyring(_request: Request, exc: KeyringUnavailable) -> JSONResponse:
+        """🔴 Ours, and it must say so.
+
+        With no key material every route that touches a credential fails —
+        including `GET /connections/{provider}/authorize`, which signs its state
+        with the same keyring. Unhandled it reaches the client as a bare 500 and
+        a stack trace in the log, which is indistinguishable from the app being
+        broken; a reviewer following the README hits it on the first thing they
+        click after `cp .env.example .env`.
+
+        `config`, never `needs_reconnect`: telling someone to reconnect an
+        account sends them round in circles repairing a grant that was never
+        broken, when the actual fix is one line of *our* configuration (R24).
+        """
+        return JSONResponse(
+            envelope("internal_config_error", str(exc), classification="config"),
+            status_code=catalog.spec("internal_config_error").status,
+        )
 
     @app.exception_handler(SendGateError)
     async def _gate_error(_request: Request, exc: SendGateError) -> JSONResponse:

@@ -42,7 +42,19 @@
   },
 
   "onCreateCommand": "curl -LsSf https://astral.sh/uv/install.sh | sh",
-  "postCreateCommand": "$HOME/.local/bin/uv sync --all-extras && (cd apps/web && npm install)",
+  // 🔴 The keyring is generated here, and only here.
+  //
+  // `.env.example` ships `TOKEN_KEYRING=` empty — it is committed, so it cannot
+  // contain key material — and every route that touches a credential fails
+  // without one. A reviewer who follows the README (`cp .env.example .env`,
+  // bring the stack up, click Connect) otherwise meets a failure on the first
+  // meaningful thing they do.
+  //
+  // Generated rather than defaulted, and *only* in a devcontainer: `risks.md`
+  // R9 forbids a generate-if-missing path in the app itself, because a key that
+  // appears by magic means a later restart silently cannot decrypt what the
+  // earlier one wrote. Here the container is disposable and so is the key.
+  "postCreateCommand": "$HOME/.local/bin/uv sync --all-extras && (cd apps/web && npm install) && ([ -f .env ] || cp .env.example .env) && (grep -q '^TOKEN_KEYRING=.\\+' .env || (sed -i \"s|^TOKEN_KEYRING=.*|TOKEN_KEYRING=$(python3 -c 'import os,base64;print(base64.b64encode(os.urandom(32)).decode())')|\" .env && echo 'generated a disposable TOKEN_KEYRING for this devcontainer'))",
 
   "customizations": {
     "vscode": {

@@ -133,3 +133,58 @@ def test_a_codespace_origin_is_derived_rather_than_configured() -> None:
     assert "https://literate-spork-example-5173.app.github.dev" in origins
     # The localhost pair still works, so `make dev` inside a Codespace does too.
     assert "http://localhost:5173" in origins
+
+
+def test_a_missing_keyring_names_itself_as_our_bug() -> None:
+    """🔴 Found by booting a Codespace and clicking Connect.
+
+    `.env.example` ships `TOKEN_KEYRING=` empty — it is committed, so it cannot
+    carry key material — and every route that touches a credential needs one,
+    including the OAuth authorize call, which signs its state with the same
+    keyring. Unhandled, `KeyringUnavailable` reached the client as a bare 500
+    with a stack trace in the log: indistinguishable from the app being broken,
+    on the first meaningful thing a reviewer clicks after following the README.
+
+    `config`, never `needs_reconnect`. Telling somebody to reconnect an account
+    sends them round in circles repairing a grant that was never broken, when
+    the fix is one line of *our* configuration (R24).
+    """
+    from api.main import create_app
+    from core.config import get_settings
+    from fastapi.testclient import TestClient
+
+    previous = {
+        name: os.environ.get(name)
+        for name in ("TOKEN_KEYRING", "TOKEN_KEYRING_PATH", "GOOGLE_CLIENT_ID",
+                     "GOOGLE_CLIENT_SECRET", "OAUTH_TUNNEL_URL")
+    }
+    os.environ.update(
+        TOKEN_KEYRING="",
+        TOKEN_KEYRING_PATH="/nonexistent/keyring",
+        GOOGLE_CLIENT_ID="id",
+        GOOGLE_CLIENT_SECRET="secret",
+        OAUTH_TUNNEL_URL="https://tunnel.test",
+    )
+    get_settings.cache_clear()
+    try:
+        client = TestClient(
+            create_app(run_worker_inline=False), raise_server_exceptions=False
+        )
+        key = client.post(
+            "/v1/auth/dev-login", json={"email": "keyring@example.test"}
+        ).json()["key"]
+        response = client.get(
+            "/v1/connections/gmail/authorize", headers={"X-API-Key": key}
+        )
+    finally:
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+        get_settings.cache_clear()
+
+    body = response.json()["error"]
+    assert body["code"] == "internal_config_error"
+    assert body["classification"] == "config"
+    assert "reconnect" not in body["code"]
