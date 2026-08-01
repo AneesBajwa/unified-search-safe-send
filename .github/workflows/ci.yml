@@ -1,0 +1,86 @@
+# The checks that have to pass on a machine that is not this one.
+#
+# Two jobs rather than one, because they are two toolchains and a failure in
+# either should name itself rather than hide behind the other's setup time.
+#
+# 🔴 No secrets, no services block, no network to a provider. The suite starts
+# its own Postgres through testcontainers and every adapter falls back to a
+# fixture set badged `mock` when no credential is configured — so CI exercises
+# the same code path a reviewer's clean clone does. A suite that needed a key
+# would be a suite nobody outside this repo could run.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A second push supersedes the first; there is nothing to learn from a run
+# against a commit that is already stale.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  api:
+    name: api · ruff, import-linter, mypy, pytest
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      # `--frozen` so the lockfile is the thing under test. Resolving fresh here
+      # would mean CI passes against dependencies nobody has on disk.
+      - run: uv sync --frozen
+
+      - name: ruff
+        run: uv run ruff check .
+
+      # The module boundary: `core` imports nothing from `apps/` and no web
+      # framework. Prose in a README rots; this does not.
+      - name: import-linter
+        run: uv run lint-imports
+
+      - name: mypy --strict
+        run: uv run mypy
+
+      # testcontainers starts its own Postgres 17 against the runner's Docker
+      # daemon, so there is no `services:` block to keep in step with the
+      # version the app actually runs on.
+      - name: pytest
+        run: uv run pytest -q
+
+  web:
+    name: web · tsc, oxlint, vitest
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      # `ci`, not `install`: the lockfile decides, and a drifted one fails here
+      # rather than producing a build nobody can reproduce.
+      - run: npm ci
+
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
