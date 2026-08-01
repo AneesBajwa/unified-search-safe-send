@@ -230,6 +230,27 @@ Google grant, because we ask for `email` and Google returns
 ⚠️ Prefer a **developer sandbox** over a free workspace: no 90-day window, no
 10-app cap, and no bulk-send throttle while seeding demo messages.
 
+#### The Slack ToS boundary
+
+Slack's API terms restrict storing message content, and the design takes that
+seriously rather than working around it:
+
+- **Message bodies are cached with a TTL, not archived.** `search_results` gives
+  provider-sourced body text an expiry column; identifiers, permalinks and
+  timestamps persist so history stays navigable after the content ages out.
+  A search result you can still click is not the same as a copy of the message.
+- **Only identifiers are persisted long-term** — channel id, message `ts`,
+  permalink. Everything a user needs to go and look at the original, nothing
+  that stands in for it.
+- **The app stays undistributed.** No public distribution, no directory listing,
+  no shared installation. Each reviewer installs the manifest into their own
+  workspace under their own tokens, which is also why the credentials never
+  leave the machine they were granted on.
+
+The same reasoning is why the reconciliation probe reads
+`conversations.history` for one message id rather than pulling a channel: the
+narrowest read that answers "did this specific message post".
+
 ### Test accounts
 
 Use throwaway accounts. No reviewer is ever asked to connect a personal
