@@ -7,7 +7,13 @@
     // daemon it actually controls.
     "ghcr.io/devcontainers/features/docker-in-docker:2": {},
     "ghcr.io/devcontainers/features/python:1": { "version": "3.13" },
-    "ghcr.io/devcontainers/features/node:1": { "version": "22" }
+    "ghcr.io/devcontainers/features/node:1": { "version": "22" },
+    // The base image ships no SSH server, so `gh codespace ssh` fails with
+    // "Please check if an SSH server is installed in the container" — which
+    // means the CLI cannot drive the Codespace at all and everything has to go
+    // through the browser terminal. Found by booting one rather than by reading
+    // the config.
+    "ghcr.io/devcontainers/features/sshd:1": {}
   },
 
   "forwardPorts": [8080, 8081, 5173, 5433],
