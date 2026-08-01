@@ -19,6 +19,7 @@ from typing import Any
 
 import httpx
 
+from core.adapters.types import TokenUnavailable
 from core.enums import ErrorClass
 
 # ---------------------------------------------------------------------------
@@ -226,6 +227,21 @@ def classify(exc: BaseException, provider: str | None = None) -> ErrorClass:
     one; a ``ProviderError`` always classifies against its own provider.
     """
     if isinstance(exc, NeedsReconnect):
+        return ErrorClass.NEEDS_RECONNECT
+
+    # 🔴 A source with no usable connection is `needs_reconnect`, never
+    # `permanent`. It reached this function as a bare RuntimeError and therefore
+    # fell through to the catch-all below, which meant a **brand-new user's very
+    # first search** reported Gmail and Slack as `provider_unavailable`,
+    # classification `permanent` — "this provider is broken and will stay
+    # broken", about a provider they simply had not connected yet.
+    #
+    # That is the R16 failure in its purest form: not "we looked and found
+    # nothing" but "we could not look", reported as neither. And `permanent`
+    # carries no action, when the action is one click away. `needs_reconnect` is
+    # the class that renders as an action rather than an error, which is exactly
+    # what this is.
+    if isinstance(exc, TokenUnavailable):
         return ErrorClass.NEEDS_RECONNECT
 
     if isinstance(exc, ProviderError):

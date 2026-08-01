@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import os
+import sys
 import uuid
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
@@ -19,6 +20,17 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# `scripts/` is not an installed package — the wheel ships `core`, `api` and
+# `worker`, and the scripts are operator tools rather than library code. But the
+# seeder and the schema generator are both **behaviour under test**, so the tests
+# have to be able to import them. Explicit rather than relying on pytest's path
+# insertion, which adds `tests/` and not the repo root: without this, importing
+# `scripts.*` works from inside a test function (by then something else has
+# populated sys.path) and fails at module import, which is a confusing way to
+# discover the difference.
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 # contracts.md §3, Tests column. Set before anything imports core.config, so the
 # lru_cached Settings are built from these rather than from a developer's .env.
@@ -54,6 +66,34 @@ TEST_ENV = {
     "SLACK_CLIENT_SECRET": "",
     "OAUTH_TUNNEL_URL": "",
 }
+
+def _apply_test_env() -> None:
+    """Put the test configuration in place **at conftest import**, not at fixture time.
+
+    🔴 This is not tidiness. ``core.adapters.live`` calls ``get_settings()`` and
+    registers adapters **at module import**, so whichever settings exist the
+    moment something first imports it decide whether `gmail` and `slack` are the
+    real adapters or the fixtures. conftest is imported before any test module,
+    so doing it here makes that moment deterministic.
+
+    Applied inside the ``database_url`` fixture alone — where it used to live —
+    the suite passed only as long as no test module imported ``api.main`` at
+    module scope. The first one that did picked up the **developer's real
+    ``.env``** during collection, registered live Gmail and Slack, and a
+    fan-out test that had passed for three phases started reporting `failed`
+    for two sources with no tokens behind them. It would have failed on a
+    machine with credentials and passed on CI, which is the worst shape a test
+    failure has.
+
+    ``DATABASE_URL`` is deliberately not here: it is the one value that cannot
+    be known until the container is up.
+    """
+    for key, value in TEST_ENV.items():
+        os.environ[key] = value
+
+
+_apply_test_env()
+
 
 ALL_TABLES = (
     "send_resolutions",
@@ -91,8 +131,10 @@ def database_url() -> Iterator[str]:
     with PostgresContainer("postgres:17-alpine", driver="asyncpg") as container:
         url = container.get_connection_url()
         os.environ["DATABASE_URL"] = url
-        for key, value in TEST_ENV.items():
-            os.environ[key] = value
+        # Re-applied rather than assumed: a test that monkeypatches a setting and
+        # clears the cache must not leave the next session-scoped consumer
+        # reading it.
+        _apply_test_env()
 
         from core.config import get_settings
 

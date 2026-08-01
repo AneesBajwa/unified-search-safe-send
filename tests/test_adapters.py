@@ -24,6 +24,7 @@ from core.adapters.types import (
 )
 from core.db import session_scope
 from core.jobs import runtime
+from sqlalchemy import text
 
 pytestmark = pytest.mark.usefixtures("clean_db")
 
@@ -191,6 +192,80 @@ def test_a_chatty_source_is_capped() -> None:
 # ---------------------------------------------------------------------------
 
 
+async def test_a_second_grant_on_one_provider_gets_its_own_adapter_run() -> None:
+    """`provider-connections`: one independent adapter run **per connection**.
+
+    🔴 The fan-out used to build ``{provider: connection_id}`` and so kept only
+    the *last* grant. A user with two accounts on one provider got a single run
+    against one of them and the other was never searched — and nothing surfaced
+    it, because the snapshot showed one healthy source. Half the mailbox the
+    user had deliberately connected simply did not appear in the results.
+
+    Asserted on the runs rather than on the dict, because the dict was the bug.
+    """
+    # A source whose name matches a provider and which needs a grant. In the
+    # hermetic environment the real ones register as connectionless fakes, so
+    # the attach — the thing under test — would never happen.
+    source = "gmail"
+    previous = registry.registration(source)
+    registry.register(
+        source,
+        previous.factory,
+        participates_by_default=False,
+        mode=previous.mode,
+        requires_connection=True,
+    )
+
+    user_id = await make_user()
+    connection_ids: list[int] = []
+    async with session_scope() as session:
+        for index in (1, 2):
+            connection_id = await session.scalar(
+                text(
+                    """
+                    INSERT INTO connections (user_id, provider, external_account_id,
+                                             display_name, status)
+                    VALUES (:user_id, CAST(:provider AS provider_kind), :external_id,
+                            :display, 'active')
+                    RETURNING id
+                    """
+                ),
+                {
+                    "user_id": user_id,
+                    "provider": source,
+                    "external_id": f"account-{index}",
+                    "display": f"person{index}@example.test",
+                },
+            )
+            connection_ids.append(int(connection_id or 0))
+        plan = await plan_search(
+            session, user_id=user_id, query="acme renewal", sources=[source]
+        )
+        await session.commit()
+
+    assert [run.connection_id for run in plan.runs] == connection_ids, (
+        "a search must dispatch one independent adapter run per connection"
+    )
+    assert len({run.job_id for run in plan.runs}) == 2, "the two runs share a job"
+
+    snapshot = await load_snapshot(search_id=plan.search_id, user_id=user_id)
+    assert snapshot is not None
+    # Two entries for one source name, told apart by the account they went
+    # through — `source` alone is not a key.
+    assert [row["source"] for row in snapshot.sources] == [source, source]
+    assert [row["display_name"] for row in snapshot.sources] == [
+        "person1@example.test",
+        "person2@example.test",
+    ]
+    registry.register(
+        source,
+        previous.factory,
+        participates_by_default=previous.participates_by_default,
+        mode=previous.mode,
+        requires_connection=previous.requires_connection,
+    )
+
+
 async def test_a_search_fans_out_to_every_registered_source_and_stores_results() -> None:
     user_id = await make_user()
     async with session_scope() as session:
@@ -278,8 +353,30 @@ async def test_a_revoked_grant_surfaces_as_reconnect_not_a_generic_failure(
         "a revoked grant must be its own status, not a flavour of `failed`"
     )
     assert revoked["error"]["classification"] == "needs_reconnect"
-    assert revoked["error"]["code"] == "connection_needs_reconnect"
-    # There must be somewhere to go. An error with no action is a dead end.
+    # One of the two **actionable** codes. Which one depends on whether a
+    # connection row exists to re-grant, and `fault:reconnect` is a synthetic
+    # source that never had one — `plan_search` attaches a connection by matching
+    # `connections.provider` to the source name, and no provider is called
+    # `fault:reconnect`. So it reports the never-connected variant, honestly.
+    # The connection-carrying variant is pinned by
+    # `test_connection_routes.py::test_every_advertised_reconnect_url_resolves`,
+    # which registers its source as `gmail` and does get a connection attached.
+    #
+    # What this test grades is the property both share and that headline 4 is
+    # about: **an action, not an error**.
+    assert revoked["error"]["code"] in {
+        "connection_needs_reconnect",
+        "connection_not_connected",
+    }
+    # There must be somewhere to go. An error with no action is a dead end —
+    # so the URL is followed rather than pattern-matched, which is the only way
+    # the 404 this project shipped twice would ever have shown up.
+    action = revoked["error"]["action_url"]
+    followed = await client.get(action, headers=headers)  # type: ignore[attr-defined]
+    assert followed.status_code != 404, (
+        f"the repair we offered, {action!r}, answered 404 — the one action that "
+        "fixes a revoked grant led nowhere"
+    )
     assert "invalid_grant" in revoked["error"]["message"]
 
     # And the healthy source is unaffected — one revoked connection does not

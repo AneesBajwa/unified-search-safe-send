@@ -51,9 +51,30 @@ def get_engine() -> AsyncEngine:
             # Recycle under that 300s window so we retire connections before
             # Neon does it for us.
             pool_recycle=240,
-            pool_size=5,
-            # Starvation should fail loudly rather than silently growing the
-            # pool until the database refuses connections.
+            # 🔴 Sized from the batch, not a constant, and the factor of two is
+            # the whole point.
+            #
+            # A claimed job holds its own `AsyncSession` for its entire
+            # execution (task 1.4d) and then opens a **second** one for
+            # bookkeeping — `handlers._mark_run_started` writes `status =
+            # 'running'` in its own transaction so that progress is visible
+            # before the job ends, and so that the failure path is not fighting
+            # the job's own row lock. So a batch of N jobs needs 2N connections,
+            # not N.
+            #
+            # With `pool_size=5` and `job_batch_size=5` that was a **guaranteed
+            # deadlock** the moment a full batch was claimed: five jobs hold all
+            # five connections and every one of them waits for a sixth that can
+            # only come from a peer finishing. Nobody finishes. The lease
+            # expires, the batch is reclaimed, and it does it again — which
+            # presents as "a search never finished, is a worker running?" rather
+            # than as a pool problem. Found in phase 5: `make smoke` took 32-62s
+            # at the default batch and 1.8s at `JOB_BATCH_SIZE=2`, same code,
+            # same data.
+            pool_size=max(2 * get_settings().job_batch_size, 5),
+            # Still zero. Starvation should fail loudly rather than silently
+            # growing the pool until the database refuses connections — the fix
+            # above is to stop *manufacturing* starvation, not to hide it.
             max_overflow=0,
             # NB: prepared_statement_cache_size=0 — mandatory behind Neon's
             # transaction-mode pooler — is carried on the URL by

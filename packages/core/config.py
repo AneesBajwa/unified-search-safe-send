@@ -78,6 +78,14 @@ class Settings(BaseSettings):
     # mode `mock`, which the UI badges. Tests always run against the mock.
     web_search_api_key: SecretStr = Field(default=SecretStr(""), repr=False)
 
+    # Where seeded sends are addressed, and the address the README tells a
+    # reviewer to use (task 10.6). Configured rather than invented so nobody is
+    # ever asked to supply a personal address to see the product work — and so
+    # the one place it is written down is the one place it has to be changed.
+    # `.test` is reserved by RFC 6761 and can never resolve, which is the point:
+    # a seeded row that somehow reached a provider could not deliver anywhere.
+    test_recipient: str = "qa@example.test"
+
     @property
     def public_base_url(self) -> str:
         """What a provider must be able to reach us on.

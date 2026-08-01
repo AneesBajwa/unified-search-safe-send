@@ -29,6 +29,10 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import get_settings
+
+# Through the helper, never hand-rolled. This exact path was built by hand once
+# and answered 404 on the one surface where a user meets a revoked grant.
+from core.connections import service as connections
 from core.enums import JobKind, ProviderKind, SendState
 from core.jobs import queue
 from core.providers.gmail import DRAFTS_URL as GMAIL_DRAFTS_URL
@@ -47,13 +51,26 @@ class SendGateError(Exception):
     """
 
     def __init__(
-        self, code: str, message: str, *, status: int = 422, classification: str = "permanent"
+        self,
+        code: str,
+        message: str,
+        *,
+        status: int = 422,
+        classification: str = "permanent",
+        action_url: str | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
         self.status = status
         self.classification = classification
+        # 🔴 Where the customer goes to fix it, when there is anywhere to go.
+        # `api-design.md` has always said `connection_needs_reconnect` carries
+        # this; the gate raised it without one, so the compose screen showed a
+        # refusal with nothing to click — a dead end at the exact moment the
+        # product is meant to offer the repair. Built by the caller from the
+        # connection it just failed to find, never by a client.
+        self.action_url = action_url
 
 
 def new_idempotency_key() -> str:
@@ -422,7 +439,11 @@ async def operator_retry(
         return send_payload(row, idempotent_replay=True)
     if state == SendState.UNCERTAIN.value:
         raise SendGateError(
-            "confirmation_required",
+            # Its own code, not `confirmation_required`. Both refusals used that
+            # one and they disagreed about the status — 422 at the gate, 409
+            # here — which is a code a client cannot branch on. This one says
+            # what it means, and `resolve` is the action it names.
+            "resolution_required",
             "this send is in doubt; resolve it explicitly rather than retrying, "
             "so a message that already arrived is not sent twice",
             status=409,
@@ -468,30 +489,200 @@ async def operator_retry(
     return send_payload(refreshed)
 
 
+#: The two ways a person can settle a send we could not settle ourselves.
+#: Mirrors the CHECK on ``send_resolutions.resolution``.
+RESOLUTIONS = ("marked_delivered", "forced_resend")
+
+#: What goes in ``provider_message_id`` when a **person** attested to delivery.
+#:
+#: 🔴 Deliberately not provider-shaped. ``sends_delivered_has_evidence`` makes
+#: "delivered with no evidence" unrepresentable, and that constraint is right —
+#: but the evidence for this row is a human who looked, recorded in
+#: ``send_resolutions`` with who and when, and the database cannot see that
+#: table. So the column carries a marker no provider would ever emit, and the
+#: detail payload carries the ``resolution`` block that says what actually
+#: happened. A client renders "you marked this delivered", never "the provider
+#: confirmed it" — which are different claims, and this is the state where the
+#: difference is the entire content.
+OPERATOR_ATTESTED = "operator-attested"
+
+
+async def resolve_send(
+    session: AsyncSession,
+    send_id: uuid.UUID,
+    *,
+    user_id: int,
+    resolution: str,
+    note: str | None = None,
+) -> dict[str, Any]:
+    """Settle an in-doubt send (api-design.md ``POST /sends/{id}/resolve``).
+
+    ``uncertain`` means *we do not know*, which is not a failure and must never
+    be offered a retry — retrying a message that already arrived is the exact
+    misfire this product exists to prevent. What it needs is a decision, and
+    only a person who can look at the provider can make it. The send detail
+    hands them the evidence to do so: ``dispatched_at``, ``reconcile_attempts``,
+    and a ``verify_url`` into their own mailbox or channel.
+
+    **``marked_delivered``** — they saw it. The row becomes ``delivered`` with an
+    operator attestation rather than a provider id (see ``OPERATOR_ATTESTED``).
+
+    **``forced_resend``** — they looked and it is not there. This is the only
+    path in the system that clears ``dispatched_at``, and clearing it is the
+    whole point: with it set, :func:`core.send.handler.run_send` reconciles
+    instead of dispatching, and a probe that has already failed three times will
+    fail a fourth. The user has answered the question the probe could not, so the
+    next attempt dispatches. Every other caller leaves that column alone.
+    """
+    if resolution not in RESOLUTIONS:
+        raise SendGateError(
+            "recipient_invalid",
+            f"resolution must be one of {', '.join(RESOLUTIONS)}",
+        )
+
+    row = await load_send(session, send_id, user_id=user_id)
+    if row is None:
+        raise SendGateError("not_found", "no such send", status=404)
+    if _state_value(row["state"]) != SendState.UNCERTAIN.value:
+        raise SendGateError(
+            "recipient_invalid",
+            f"only an uncertain send needs resolving; this one is {_state_value(row['state'])}",
+        )
+
+    # Written first and unconditionally: the audit of who decided what is the
+    # durable part, and it must not depend on the state change that follows
+    # succeeding.
+    await session.execute(
+        text(
+            """
+            INSERT INTO send_resolutions (send_id, user_id, resolution, note)
+            VALUES (:id, :user_id, :resolution, :note)
+            """
+        ),
+        {"id": send_id, "user_id": user_id, "resolution": resolution, "note": note},
+    )
+
+    if resolution == "marked_delivered":
+        await session.execute(
+            text(
+                """
+                UPDATE sends
+                   SET state = 'delivered',
+                       provider_message_id = COALESCE(provider_message_id, :attested),
+                       delivered_at = COALESCE(delivered_at, now()),
+                       updated_at = now()
+                 WHERE id = :id AND user_id = :user_id AND state = 'uncertain'
+                """
+            ),
+            {"id": send_id, "user_id": user_id, "attested": OPERATOR_ATTESTED},
+        )
+    else:
+        await session.execute(
+            text(
+                """
+                UPDATE sends
+                   SET state = 'in_flight',
+                       reconcile_attempts = 0,
+                       dispatched_at = NULL,
+                       updated_at = now()
+                 WHERE id = :id AND user_id = :user_id AND state = 'uncertain'
+                """
+            ),
+            {"id": send_id, "user_id": user_id},
+        )
+        job_id = await session.scalar(
+            text(
+                "SELECT id FROM jobs WHERE kind = 'send' AND ref_id = :ref "
+                "ORDER BY id DESC LIMIT 1"
+            ),
+            {"ref": send_id},
+        )
+        if job_id is None:
+            await queue.enqueue(
+                session,
+                kind=JobKind.SEND,
+                ref_id=send_id,
+                partition_key=f"{_state_value(row['provider'])}:{row['connection_id']}",
+            )
+        else:
+            await queue.operator_retry(session, int(job_id))
+
+    refreshed = await load_send(session, send_id, user_id=user_id)
+    assert refreshed is not None
+    payload = send_payload(refreshed)
+    payload["resolution"] = resolution
+    return payload
+
+
 # ---------------------------------------------------------------------------
 # Reads
 # ---------------------------------------------------------------------------
 
 
+#: The columns every send view needs, in one place so the list and the detail
+#: cannot drift into showing different facts about the same row.
+#:
+#: The lateral join is what turns "retrying" from a spinner into a countdown
+#: (task 11.5c): ``run_at`` is when the next attempt fires and
+#: ``backoff_seconds`` is how long the wait was, both read from the job that
+#: will actually run. A UI cannot compute either — the backoff has full jitter,
+#: so the only honest source is the row the worker will claim.
+_SEND_COLUMNS = """
+        SELECT s.*, d.recipient_display, d.subject AS draft_subject, d.body,
+               c.display_name AS connection_display,
+               j.run_at AS job_run_at, j.backoff_seconds AS job_backoff_seconds,
+               j.state::text AS job_state
+          FROM sends s
+          JOIN drafts d ON d.id = s.draft_id
+          JOIN connections c ON c.id = s.connection_id
+          LEFT JOIN LATERAL (
+              SELECT run_at, backoff_seconds, state
+                FROM jobs
+               WHERE kind = 'send' AND ref_id = s.id
+               ORDER BY id DESC LIMIT 1
+          ) j ON true
+"""
+
+
 async def list_sends(
-    session: AsyncSession, *, user_id: int, limit: int = 25, include_seed: bool = True
+    session: AsyncSession,
+    *,
+    user_id: int,
+    limit: int = 25,
+    include_seed: bool = True,
+    before: tuple[datetime, uuid.UUID] | None = None,
 ) -> list[dict[str, Any]]:
+    """Newest first, keyset-paged.
+
+    One row over the limit is fetched deliberately and discarded by the caller:
+    it is the evidence that another page exists, which is what lets the response
+    say "no more" instead of offering a cursor that resolves to nothing.
+    """
     rows = (
         await session.execute(
             text(
-                """
-                SELECT s.*, d.recipient_display, d.subject AS draft_subject, d.body,
-                       c.display_name AS connection_display
-                  FROM sends s
-                  JOIN drafts d ON d.id = s.draft_id
-                  JOIN connections c ON c.id = s.connection_id
+                _SEND_COLUMNS
+                + """
                  WHERE s.user_id = :user_id
                    AND (:include_seed OR NOT s.is_seed)
-                 ORDER BY s.created_at DESC
+                   -- Explicitly cast: asyncpg infers parameter types from
+                   -- the statement, and a bare NULL inside a row comparison
+                   -- gives it nothing to infer from — the failure is an
+                   -- AmbiguousParameterError at execute time, not at parse.
+                   AND (CAST(:cursor_at AS timestamptz) IS NULL
+                        OR (s.created_at, s.id)
+                           < (CAST(:cursor_at AS timestamptz), CAST(:cursor_id AS uuid)))
+                 ORDER BY s.created_at DESC, s.id DESC
                  LIMIT :limit
                 """
             ),
-            {"user_id": user_id, "limit": min(limit, 100), "include_seed": include_seed},
+            {
+                "user_id": user_id,
+                "limit": limit,
+                "include_seed": include_seed,
+                "cursor_at": before[0] if before else None,
+                "cursor_id": before[1] if before else None,
+            },
         )
     ).mappings().all()
     return [_detail_payload(dict(row)) for row in rows]
@@ -502,16 +693,7 @@ async def send_detail(
 ) -> dict[str, Any]:
     row = (
         await session.execute(
-            text(
-                """
-                SELECT s.*, d.recipient_display, d.subject AS draft_subject, d.body,
-                       c.display_name AS connection_display
-                  FROM sends s
-                  JOIN drafts d ON d.id = s.draft_id
-                  JOIN connections c ON c.id = s.connection_id
-                 WHERE s.id = :id AND s.user_id = :user_id
-                """
-            ),
+            text(_SEND_COLUMNS + " WHERE s.id = :id AND s.user_id = :user_id"),
             {"id": send_id, "user_id": user_id},
         )
     ).mappings().first()
@@ -519,6 +701,23 @@ async def send_detail(
         raise SendGateError("not_found", "no such send", status=404)
 
     payload = _detail_payload(dict(row))
+    resolution = (
+        await session.execute(
+            text(
+                """
+                SELECT resolution, note, created_at
+                  FROM send_resolutions WHERE send_id = :id
+                 ORDER BY id DESC LIMIT 1
+                """
+            ),
+            {"id": send_id},
+        )
+    ).mappings().first()
+    if resolution is not None:
+        # A resolved send says who settled it and how. Without this the history
+        # row reads as though the provider answered, when in fact a person did —
+        # and which of the two happened is the whole content of this state.
+        payload["resolution"] = dict(resolution)
     if payload["state"] == SendState.UNCERTAIN.value:
         # The evidence a person needs to settle it themselves, in seconds,
         # without asking us. `uncertain` renders amber, not red: failed means we
@@ -536,8 +735,19 @@ async def send_detail(
 def _detail_payload(row: dict[str, Any]) -> dict[str, Any]:
     state = _state_value(row["state"])
     payload = send_payload(row)
+    # A retry that is genuinely waiting, and only then. Populated for a job that
+    # is `ready` with a run_at still ahead of us — a terminal failure has no next
+    # attempt, and reporting one would render a countdown that never fires,
+    # which is a worse lie than a spinner because it looks like information.
+    waiting = (
+        row.get("job_state") == "ready"
+        and row.get("job_run_at") is not None
+        and row["job_run_at"] > datetime.now(UTC)
+    )
     payload.update(
         {
+            "next_attempt_at": row["job_run_at"] if waiting else None,
+            "backoff_seconds": row.get("job_backoff_seconds") if waiting else None,
             "channel": _state_value(row["provider"]),
             "recipient_display": row.get("recipient_display"),
             "connection_display": row.get("connection_display"),
@@ -613,11 +823,33 @@ async def _resolve_connection(
         )
     ).mappings().first()
     if row is None:
+        # Same two cases the search snapshot distinguishes, and the same reason:
+        # offering to *re*connect an account somebody never linked reads as
+        # though we lost something of theirs. A row that exists but is not
+        # active is repaired in place; no row at all is a first connect.
+        broken = (
+            await session.execute(
+                text(
+                    """
+                    SELECT id FROM connections
+                     WHERE user_id = :user_id
+                       AND provider = CAST(:provider AS provider_kind)
+                     ORDER BY id LIMIT 1
+                    """
+                ),
+                {"user_id": user_id, "provider": channel.value},
+            )
+        ).first()
         raise SendGateError(
             "connection_needs_reconnect",
             f"no active {channel.value} connection to send from",
             status=409,
             classification="needs_reconnect",
+            action_url=(
+                connections.reconnect_url(int(broken[0]), channel.value)
+                if broken is not None
+                else f"/v1/connections/{channel.value}/authorize"
+            ),
         )
     return dict(row)
 

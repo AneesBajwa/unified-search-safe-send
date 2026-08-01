@@ -40,6 +40,22 @@ TOKEN_FIELDS = {
 }
 
 
+#: The ``external_account_id`` the PoC sign-in writes for a provider that had no
+#: OAuth client configured when the user signed in. It is a **sentinel, never a
+#: provider account id** — the row it names has no tokens and can never reach
+#: anything.
+#:
+#: It matters here because :class:`ReconnectMismatch` exists to stop a re-grant
+#: silently repointing a *real* mailbox at a different one, and a placeholder is
+#: not a mailbox. See :func:`upsert`.
+PLACEHOLDER_PREFIX = "fake:"
+
+
+def is_placeholder(external_account_id: str) -> bool:
+    """True for a row that was never bound to a provider account."""
+    return external_account_id.startswith(PLACEHOLDER_PREFIX)
+
+
 class ReconnectMismatch(Exception):
     """The re-grant landed on a different provider account than the one being
     repaired. Carries both ids so the message can name them."""
@@ -162,10 +178,26 @@ async def upsert(
     if reconnecting_id is not None:
         existing = await by_id(session, reconnecting_id)
         if existing is not None and existing.external_account_id != grant.external_account_id:
-            # Never silently rebound: every draft and send references
-            # `connection.id`, and repointing it at a different mailbox would
-            # rewrite the meaning of all of them.
-            raise ReconnectMismatch(existing.external_account_id, grant.external_account_id)
+            if is_placeholder(existing.external_account_id):
+                # 🔴 Adopted, not refused. The guard below protects a *real*
+                # mailbox from being silently repointed; a placeholder has never
+                # been bound to one, holds no tokens, and could never have
+                # delivered anything — so there is no meaning to rewrite.
+                #
+                # Refusing here is a dead end, and it was on the default
+                # sign-in path: the PoC identity carries placeholder rows from
+                # before the OAuth clients existed, the console offers the
+                # reconnect those rows advertise, and the callback answered
+                # `reconnect_account_mismatch`. The one repair the product
+                # promises always exists did not.
+                await _adopt_placeholder(session, existing, grant.external_account_id)
+            else:
+                # Never silently rebound: every draft and send references
+                # `connection.id`, and repointing it at a different mailbox would
+                # rewrite the meaning of all of them.
+                raise ReconnectMismatch(
+                    existing.external_account_id, grant.external_account_id
+                )
 
     row = (
         await session.execute(
@@ -205,6 +237,52 @@ async def upsert(
     refreshed = await by_id(session, connection_id)
     assert refreshed is not None
     return refreshed
+
+
+async def _adopt_placeholder(
+    session: AsyncSession, existing: ConnectionRow, external_account_id: str
+) -> None:
+    """Rebind a placeholder row onto the account that just authorized.
+
+    Done as its own statement *before* the upsert so the natural-key conflict
+    below lands on this row rather than inserting a second one — which is the
+    point: `connection.id` stays stable, so the drafts and sends that reference
+    it keep referring to something that now works.
+
+    Skipped when the user already has a real connection for that account. Two
+    rows may not share the natural key, and the honest outcome there is that the
+    working row wins and the placeholder is left to be disconnected.
+    """
+    clash = (
+        await session.execute(
+            text(
+                """
+                SELECT id FROM connections
+                 WHERE user_id = :user_id
+                   AND provider = CAST(:provider AS provider_kind)
+                   AND external_account_id = :external_account_id
+                """
+            ),
+            {
+                "user_id": existing.user_id,
+                "provider": existing.provider,
+                "external_account_id": external_account_id,
+            },
+        )
+    ).first()
+    if clash is not None:
+        return
+
+    await session.execute(
+        text(
+            """
+            UPDATE connections
+               SET external_account_id = :external_account_id, updated_at = now()
+             WHERE id = :id
+            """
+        ),
+        {"id": existing.id, "external_account_id": external_account_id},
+    )
 
 
 async def persist_tokens(

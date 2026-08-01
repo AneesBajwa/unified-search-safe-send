@@ -21,6 +21,7 @@ from core.connections import oauth, service, state, store, tokens
 from core.db import session_scope
 from core.enums import ErrorClass
 from core.errors import NeedsReconnect, ProviderError, classify
+from sqlalchemy import text
 
 pytestmark = pytest.mark.usefixtures("clean_db")
 
@@ -216,6 +217,57 @@ async def test_a_reconnect_to_a_different_account_is_refused() -> None:
                 grant=other,
                 reconnecting_id=connection_id,
             )
+
+
+async def test_reconnecting_a_placeholder_adopts_it_rather_than_refusing() -> None:
+    """🔴 The refusal above must not fire for a row that was never bound.
+
+    The PoC sign-in writes placeholder rows for a provider with no OAuth client
+    (``fake:gmail:dev``). Those rows hold no tokens and could never have
+    delivered anything, so there is no meaning to protect — but the mismatch
+    guard compared ids blindly and refused, which put a **dead end on the
+    default sign-in path**: the console offered the reconnect the row
+    advertised and the callback answered ``reconnect_account_mismatch``.
+
+    Adoption keeps ``connection.id`` stable, which is the whole point of
+    reconnect-in-place: the drafts and sends that referenced the placeholder now
+    reference something that works.
+    """
+    user_id = await make_user()
+    async with session_scope() as session:
+        placeholder = await session.scalar(
+            text(
+                """
+                INSERT INTO connections (user_id, provider, external_account_id,
+                                         display_name, status)
+                VALUES (:user_id, 'gmail', :external_id, 'dev (fake Gmail)', 'active')
+                RETURNING id
+                """
+            ),
+            {"user_id": user_id, "external_id": f"{store.PLACEHOLDER_PREFIX}gmail:dev"},
+        )
+        await session.commit()
+
+    real = oauth.Grant(
+        external_account_id="110127218473095624248",
+        display_name="someone@gmail.com",
+        access_token="ya29.real",
+        refresh_token="1//0-real",
+    )
+    async with session_scope() as session:
+        row = await store.upsert(
+            session,
+            user_id=user_id,
+            provider="gmail",
+            grant=real,
+            reconnecting_id=int(placeholder),
+        )
+        await session.commit()
+
+    assert row.id == placeholder, "the placeholder was not adopted in place"
+    assert row.external_account_id == "110127218473095624248"
+    assert row.status == "active"
+    assert row.token("refresh_token_ct") == "1//0-real"
 
 
 async def test_disconnect_drops_tokens_and_keeps_the_row() -> None:
@@ -730,3 +782,78 @@ def test_a_grant_never_reprs_its_tokens() -> None:
     assert "super-secret" not in repr(grant)
     assert "super-secret" not in str(grant)
     assert "«redacted»" in repr(grant)
+
+
+# ---------------------------------------------------------------------------
+# The scope pre-flight (task 6.3b's missing half)
+# ---------------------------------------------------------------------------
+
+
+def test_a_google_grant_is_not_reported_as_missing_a_scope_it_has() -> None:
+    """🔴 The false alarm a naive `required ⊆ granted` produces.
+
+    Transcribed from the **live** grant on connection 31: we request `email` and
+    Google returns `https://www.googleapis.com/auth/userinfo.email`. Compare the
+    request against the response literally and this healthy, working connection
+    reports a missing scope — and a check that ever gated calls on that would
+    take a good grant offline.
+
+    This is the phase-3 rule in a new place: compare the value that actually
+    crossed the boundary, not the value we sent.
+    """
+    from core.connections import scopes
+    from core.connections.oauth import GOOGLE
+
+    live_grant = (
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.compose",
+        "openid",
+    )
+    assert scopes.missing_scopes(GOOGLE, live_grant) == ()
+    assert scopes.satisfied(GOOGLE, live_grant)
+
+
+def test_a_slack_superset_grant_is_satisfied_not_broken() -> None:
+    """`required ⊆ granted`, never equality (risks.md R5).
+
+    Slack grants are additive and cannot be narrowed — re-authorizing with a
+    scope removed from the request *and* the manifest still returns a token
+    carrying it, and only uninstalling the app clears it. So `granted` can be a
+    strict superset we are unable to give back, and an equality check would
+    report every Slack connection as broken forever.
+    """
+    from core.connections import scopes
+    from core.connections.oauth import SLACK
+
+    # The live grant on connection 32, plus a scope we can no longer revoke.
+    granted = (*scopes.required_scopes(SLACK), "files:read")
+    assert scopes.missing_scopes(SLACK, granted) == ()
+    assert scopes.satisfied(SLACK, granted)
+
+
+def test_a_genuinely_missing_scope_is_named() -> None:
+    """And named in the vocabulary we requested, which is what a person reads.
+
+    `search:read` specifically: it is a *user* scope, and Slack silently accepts
+    it in the bot `scope` parameter while the resulting token cannot call
+    `search.messages` — failing at runtime with `not_allowed_token_type`, which
+    names nothing (risks.md R4). This is the cheapest place to catch that.
+    """
+    from core.connections import scopes
+    from core.connections.oauth import SLACK
+
+    without_search = tuple(s for s in scopes.required_scopes(SLACK) if s != "search:read")
+    assert scopes.missing_scopes(SLACK, without_search) == ("search:read",)
+    assert not scopes.satisfied(SLACK, without_search)
+
+
+def test_required_scopes_covers_both_token_kinds() -> None:
+    """Bot and user scopes together — they arrive on different tokens, but a
+    connection missing either is equally unable to do its job."""
+    from core.connections import scopes
+    from core.connections.oauth import SLACK
+
+    required = scopes.required_scopes(SLACK)
+    assert "chat:write" in required, "bot scopes are missing from the requirement set"
+    assert "search:read" in required, "user scopes are missing from the requirement set"

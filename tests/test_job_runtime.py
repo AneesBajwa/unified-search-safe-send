@@ -612,6 +612,60 @@ async def test_each_gathered_job_gets_its_own_session(isolated_registry: None) -
     assert len({conn_id for _, conn_id in seen}) == 3, "connections were shared"
 
 
+async def test_a_full_batch_can_open_a_second_session_without_deadlocking(
+    isolated_registry: None,
+) -> None:
+    """🔴 The pool must fit a whole batch **twice over**.
+
+    Every real handler holds its own session for the length of the job (task
+    1.4d) and then opens a *second* one for bookkeeping — ``run_adapter`` marks
+    the run ``running`` in its own transaction so progress is visible before the
+    job ends, and ``_record_run_failure`` writes the failure in another. So a
+    claimed batch of N needs 2N connections, not N.
+
+    Phase 5 found the version where it did not: ``pool_size=5`` against
+    ``job_batch_size=5`` deadlocked the instant a full batch was claimed — five
+    jobs holding five connections, every one waiting on a sixth that could only
+    come from a peer finishing. It presented as *"a search never finished, is a
+    worker running?"*, the lease expired, the batch was reclaimed, and it did it
+    again. ``make smoke`` took 32-62s at the default batch and 1.8s at
+    ``JOB_BATCH_SIZE=2`` — same code, same data.
+
+    This test reproduces the shape rather than asserting a pool number, because
+    the number is a consequence and the shape is the rule.
+    """
+    batch = get_settings().job_batch_size
+    user_id = await make_user()
+    for _ in range(batch):
+        run_id = await make_adapter_run(user_id)
+        async with session_scope() as session:
+            await queue.enqueue(session, kind=JobKind.ADAPTER_RUN, ref_id=run_id)
+            await session.commit()
+
+    bookkept = 0
+
+    async def handler(session: object, _job: ClaimedJob) -> None:
+        nonlocal bookkept
+        # Hold the job's own connection, exactly as a real handler does...
+        await session.connection()  # type: ignore[attr-defined]
+        # ...and then ask for a second one while still holding the first.
+        async with session_scope() as second:
+            await second.execute(text("SELECT 1"))
+        bookkept += 1
+
+    runtime.HANDLERS[JobKind.ADAPTER_RUN] = handler  # type: ignore[assignment]
+
+    # Generous, because the failure mode is a hang rather than an error: with an
+    # undersized pool this never returns and the timeout is the only signal.
+    report = await asyncio.wait_for(runtime.run_once(worker_id="w:1", limit=batch), timeout=30)
+
+    assert report.claimed == batch
+    assert bookkept == batch, (
+        f"only {bookkept} of {batch} jobs got a second connection — the pool "
+        "cannot fit a full batch twice over, so a full batch deadlocks"
+    )
+
+
 async def test_error_detail_is_capped_by_bytes_not_characters(
     isolated_registry: None,
 ) -> None:

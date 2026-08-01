@@ -97,41 +97,49 @@ async def plan_search(
     runs: list[PlannedRun] = []
     for source in chosen:
         reg = registry.registration(source)
-        connection_id = connections.get(source) if reg.requires_connection else None
-        run_id = await session.scalar(
-            text(
-                """
-                INSERT INTO adapter_runs (search_id, source, connection_id, mode)
-                VALUES (:search_id, :source, :connection_id, CAST(:mode AS source_mode))
-                RETURNING id
-                """
-            ),
-            {
-                "search_id": search_id,
-                "source": source,
-                "connection_id": connection_id,
-                "mode": reg.mode.value,
-            },
-        )
-        assert isinstance(run_id, uuid.UUID)
-        job_id = await queue.enqueue(
-            session,
-            kind=JobKind.ADAPTER_RUN,
-            ref_id=run_id,
-            dedupe_key=f"adapter_run:{run_id}",
-            # No partition key. Fan-out is the behaviour being graded, and a
-            # partition key here would serialize exactly what must run in
-            # parallel. Only sends serialize (task 2.7f).
-        )
-        runs.append(
-            PlannedRun(
-                source=source,
-                adapter_run_id=run_id,
-                job_id=job_id,
-                connection_id=connection_id,
-                mode=reg.mode.value,
+        # One run per connection for a source that needs one. `[None]` covers
+        # two cases: a source that needs no grant at all, and a provider the
+        # user has not connected. The second is load-bearing — that run is what
+        # reports `connection_not_connected`, which is the state every new user
+        # sees first.
+        for connection_id in (
+            (connections.get(source) or [None]) if reg.requires_connection else [None]  # type: ignore[list-item]
+        ):
+            run_id = await session.scalar(
+                text(
+                    """
+                    INSERT INTO adapter_runs (search_id, source, connection_id, mode)
+                    VALUES (:search_id, :source, :connection_id,
+                            CAST(:mode AS source_mode))
+                    RETURNING id
+                    """
+                ),
+                {
+                    "search_id": search_id,
+                    "source": source,
+                    "connection_id": connection_id,
+                    "mode": reg.mode.value,
+                },
             )
-        )
+            assert isinstance(run_id, uuid.UUID)
+            job_id = await queue.enqueue(
+                session,
+                kind=JobKind.ADAPTER_RUN,
+                ref_id=run_id,
+                dedupe_key=f"adapter_run:{run_id}",
+                # No partition key. Fan-out is the behaviour being graded, and a
+                # partition key here would serialize exactly what must run in
+                # parallel. Only sends serialize (task 2.7f).
+            )
+            runs.append(
+                PlannedRun(
+                    source=source,
+                    adapter_run_id=run_id,
+                    job_id=job_id,
+                    connection_id=connection_id,
+                    mode=reg.mode.value,
+                )
+            )
 
     return SearchPlan(search_id=search_id, query=query, runs=tuple(runs))
 
@@ -371,9 +379,17 @@ async def _snapshot_within(
         await session.execute(
             text(
                 """
-                SELECT source, status::text AS status, mode::text AS mode, result_count,
-                       error_class::text AS error_class, error_detail, connection_id
-                  FROM adapter_runs WHERE search_id = :id ORDER BY source
+                SELECT r.source, r.status::text AS status, r.mode::text AS mode,
+                       r.result_count, r.error_class::text AS error_class,
+                       r.error_detail, r.connection_id,
+                       -- Which account this run went through. Two grants on one
+                       -- provider produce two rows for the same source name,
+                       -- and without this they are indistinguishable on screen.
+                       c.display_name
+                  FROM adapter_runs r
+                  LEFT JOIN connections c ON c.id = r.connection_id
+                 WHERE r.search_id = :id
+                 ORDER BY r.source, r.connection_id NULLS FIRST
                 """
             ),
             {"id": search_id},
@@ -423,12 +439,20 @@ async def _snapshot_within(
     )
 
 
-async def _active_connections(session: AsyncSession, user_id: int) -> dict[str, int]:
-    """Provider name -> connection id, for the sources that need one.
+async def _active_connections(session: AsyncSession, user_id: int) -> dict[str, list[int]]:
+    """Provider name -> **every** active connection id for it, in order.
 
     Read as data rather than branched on: this function does not know or care
     which providers exist, only that a run whose source matches a connection's
     provider should carry that connection's id.
+
+    🔴 **A list, not a single id.** It used to build ``{provider: id}``, which
+    silently kept the *last* row — so a user with two grants on one provider got
+    one adapter run against one of them, and the other account was never
+    searched. Nothing surfaced it: the snapshot showed a single healthy source,
+    so the results simply omitted half of what the user had connected. The
+    ``provider-connections`` spec is explicit that a search "dispatches one
+    independent adapter run per connection".
     """
     rows = (
         await session.execute(
@@ -443,4 +467,7 @@ async def _active_connections(session: AsyncSession, user_id: int) -> dict[str, 
             {"user_id": user_id},
         )
     ).all()
-    return {row.provider: row.id for row in rows}
+    grouped: dict[str, list[int]] = {}
+    for row in rows:
+        grouped.setdefault(row.provider, []).append(row.id)
+    return grouped
