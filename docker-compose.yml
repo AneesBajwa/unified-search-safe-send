@@ -54,6 +54,19 @@ services:
       DATABASE_URL: postgresql+asyncpg://app:app@db:5432/app
       APP_BASE_URL: http://localhost:8080
       CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+      # 🔴 Passed through so the API can work out its own forwarded origin in a
+      # Codespace, where the SPA is served from `<name>-5173.app.github.dev` and
+      # is therefore cross-origin. Empty everywhere else, and the API ignores
+      # them then.
+      #
+      # It has to happen here because a container inherits nothing from the
+      # host shell: the API derives the origin from these two variables, they
+      # exist in the Codespaces terminal `docker compose` is run from, and
+      # without this line they stop at the container boundary and every request
+      # the console makes is rejected. Found by booting a Codespace and reading
+      # back a missing `Access-Control-Allow-Origin`.
+      CODESPACE_NAME: "${CODESPACE_NAME:-}"
+      GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN: "${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-}"
       RUN_WORKER_INLINE: "${RUN_WORKER_INLINE:-1}"
       # Turn these on to watch partial results happen rather than infer them:
       #   SLOW_ADAPTER_SOURCE=slack SLOW_ADAPTER_DELAY_MS=8000 docker compose up -d api
