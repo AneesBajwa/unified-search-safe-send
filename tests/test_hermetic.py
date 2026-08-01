@@ -151,8 +151,13 @@ def test_a_missing_keyring_names_itself_as_our_bug() -> None:
     """
     from api.main import create_app
     from core.config import get_settings
+    from core.security.crypto import reset_keyring_cache
     from fastapi.testclient import TestClient
 
+    # ⚠️ The keyring is `lru_cache`d, so blanking the environment is not enough:
+    # any earlier test that touched a credential has already loaded one, and
+    # this passed alone and failed in the suite until the cache was cleared on
+    # both sides. Restored in the `finally` for exactly the same reason.
     previous = {
         name: os.environ.get(name)
         for name in ("TOKEN_KEYRING", "TOKEN_KEYRING_PATH", "GOOGLE_CLIENT_ID",
@@ -166,6 +171,7 @@ def test_a_missing_keyring_names_itself_as_our_bug() -> None:
         OAUTH_TUNNEL_URL="https://tunnel.test",
     )
     get_settings.cache_clear()
+    reset_keyring_cache()
     try:
         client = TestClient(
             create_app(run_worker_inline=False), raise_server_exceptions=False
@@ -183,6 +189,7 @@ def test_a_missing_keyring_names_itself_as_our_bug() -> None:
             else:
                 os.environ[name] = value
         get_settings.cache_clear()
+        reset_keyring_cache()
 
     body = response.json()["error"]
     assert body["code"] == "internal_config_error"
