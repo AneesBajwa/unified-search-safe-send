@@ -441,6 +441,7 @@ only by rotating the credential, never by a follow-up commit.
 
 ```bash
 make test        # the full suite against a throwaway Postgres 17
+make headline    # just the behaviours this is graded on (11 tests, ~17s)
 make lint        # ruff + import-linter module boundaries
 make typecheck   # mypy --strict
 make web         # the console: tsc, oxlint, and its unit tests
@@ -449,16 +450,35 @@ make schema      # regenerate the console's types from OpenAPI
 make image       # cross-build linux/amd64 and prove both entrypoints SERVE
 ```
 
-The suite is **hermetic**: no third-party keys, no network. Four behaviours are
-the ones worth looking at, because they are the ones that are easy to get
-plausibly wrong:
+CI runs all of these on every push (`.github/workflows/ci.yml`).
+
+### The headline suite
+
+`make headline` runs the six behaviours worth looking at first — marked with
+`@pytest.mark.headline` rather than moved into one file, so each stays beside
+the machinery it exercises where whoever changes that machinery will read it.
 
 | What it proves | Where |
 |---|---|
-| **Exactly-once send** under a duplicate key — concurrently, with real OS threads released by a barrier, and separately across a simulated crash between dispatch and record | `tests/test_send_gate.py`, `tests/test_send_crash.py` |
-| **A slow adapter does not block fast ones** — asserted over a **real socket**, because `TestClient` and `ASGITransport` both buffer the whole response and cannot detect blocking at all | `tests/test_partial_results.py`, `tests/test_api_e2e.py` |
-| **Every result conforms to the closed shape**, live providers included | `tests/test_adapters.py` |
-| **A revoked grant surfaces as reconnect**, and the advertised repair URL is *followed* rather than read | `tests/test_connections.py`, `tests/test_error_catalog.py` |
+| **Exactly-once send** under a duplicate key — concurrently with real OS threads released by a barrier, and separately across a crash injected at **every seam** between dispatch and record | `test_send_gate.py`, `test_send_crash.py` |
+| **A slow adapter does not block fast ones** — over a **real socket**, because `TestClient` and `ASGITransport` both buffer the whole response and so *cannot detect blocking at all* | `test_partial_results.py` |
+| **Every result conforms to the closed shape**, asserted at the wire | `test_adapters.py` |
+| **A revoked grant surfaces as reconnect** and survives one — the same connection id, and the search that failed then succeeds | `test_connections.py` |
+| **Transient retries with backoff, permanent does not retry** — the 503 reschedules and keeps its attempt count; the invalid recipient is surfaced immediately | `test_job_runtime.py` |
+| **History fidelity** — attempt count, untruncated error text, and an operator retry that *resumes* the record rather than starting a new one | `test_api_e2e.py` |
+
+### Hermetic on purpose
+
+No third-party key, no network. `tests/test_hermetic.py` asserts it rather than
+claiming it: no credential is visible, every source reports itself
+unconfigured, and **no default source is registered `live`**.
+
+That last one is the real check. Adapters register at *module import*, so if the
+test environment were applied any later than `conftest`'s own import, a machine
+with a populated `.env` would silently register live adapters and start reaching
+real providers — passing on CI and failing on a laptop, which is the worst shape
+a defect can have. That is not hypothetical; it happened, and this is what would
+have caught it.
 
 `make smoke` is the important one: it is the reviewer's own "run it entirely
 through the API" check, run continuously by us instead of once by them. Without

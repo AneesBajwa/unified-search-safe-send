@@ -289,6 +289,7 @@ async def test_a_search_fans_out_to_every_registered_source_and_stores_results()
     assert all("blended_score" in entry for entry in snapshot.ranking)
 
 
+@pytest.mark.headline
 async def test_every_result_the_api_serves_conforms_to_the_closed_shape(
     api_client: tuple[object, dict[str, str]],
 ) -> None:

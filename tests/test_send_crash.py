@@ -103,6 +103,7 @@ async def _drain() -> None:
         CrashPoint.AFTER_DELIVERY_COMMIT,
     ],
 )
+@pytest.mark.headline
 async def test_a_crash_at_any_seam_still_delivers_exactly_once(point: CrashPoint) -> None:
     """openspec task 5.11 — parametrized over every commit boundary.
 

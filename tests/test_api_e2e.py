@@ -201,6 +201,7 @@ def test_the_whole_loop_runs_through_the_api_alone(live_server: str) -> None:
         assert detail["is_seed"] is False
 
 
+@pytest.mark.headline
 def test_a_failed_send_can_be_retried_from_history(live_server: str) -> None:
     """Verification step 1's last leg, and task 13.3.
 
@@ -220,14 +221,30 @@ def test_a_failed_send_can_be_retried_from_history(live_server: str) -> None:
             "retryable_by_operator"
         ] is False
 
+        # The attempt count is on the detail and it is the *send's*, not the
+        # job's. A history view that cannot say how many times we tried is a
+        # history view that cannot answer the first question anybody asks about
+        # a failure.
+        before = client.get(f"/v1/sends/{transient}", headers=auth).json()
+        assert before["attempts"] == 2
+        assert before["max_attempts"] >= before["attempts"]
+
         retried = client.post(f"/v1/sends/{transient}/retry", headers=auth)
         assert retried.status_code == 200, retried.text
         assert retried.json()["state"] == "in_flight"
+
+        # An operator retry *resumes* the record rather than starting a new one:
+        # the count carries forward, so the history keeps saying how much has
+        # actually been spent on this message.
+        after = client.get(f"/v1/sends/{transient}", headers=auth).json()
+        assert after["send_id"] == transient
+        assert after["attempts"] >= before["attempts"]
 
         # The full error text survives — untruncated, because the record a
         # customer checks is the one that has to be complete.
         detail = client.get(f"/v1/sends/{permanent}", headers=auth).json()
         assert "invalidArgument" in detail["error"]["detail"]
+        assert detail["attempts"] == 2
 
 
 def test_an_uncertain_send_is_resolved_not_retried(live_server: str) -> None:

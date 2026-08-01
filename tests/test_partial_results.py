@@ -65,6 +65,7 @@ def slow_source() -> Iterator[float]:
         get_settings.cache_clear()
 
 
+@pytest.mark.headline
 @pytest.mark.timeout(120)
 async def test_fast_results_are_readable_while_a_slow_source_is_still_running(
     live_server: str, slow_source: float

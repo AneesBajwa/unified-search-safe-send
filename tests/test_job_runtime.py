@@ -269,6 +269,7 @@ async def test_a_job_runs_to_success_and_records_the_worker() -> None:
     assert finished is not None, "the search closes once no source is outstanding"
 
 
+@pytest.mark.headline
 async def test_transient_failure_reschedules_with_jitter_and_keeps_the_attempt() -> None:
     """A retry moves `run_at` into the future and records a countdown.
 
@@ -298,6 +299,7 @@ async def test_transient_failure_reschedules_with_jitter_and_keeps_the_attempt()
     assert run_status == "failed", "per-source status survives the job rollback"
 
 
+@pytest.mark.headline
 async def test_permanent_failure_schedules_no_retry() -> None:
     """No backoff, no future `run_at` — the reason is surfaced immediately."""
     job_id, _ = await _enqueue_adapter_job(source="fault:permanent")

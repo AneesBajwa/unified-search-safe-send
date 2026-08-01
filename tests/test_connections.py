@@ -507,6 +507,7 @@ async def test_the_slack_exchange_captures_both_tokens(configured: None) -> None
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.headline
 @respx.mock
 async def test_a_revoked_grant_surfaces_on_search_and_survives_a_reconnect(
     configured: None,

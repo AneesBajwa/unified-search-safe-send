@@ -266,6 +266,7 @@ async def test_a_duplicate_while_still_in_flight_is_a_200_not_a_409(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.headline
 async def test_n_concurrent_sends_with_one_key_produce_exactly_one_delivery() -> None:
     """openspec task 5.10, and check 2 of the manual list — the double-tap.
 
