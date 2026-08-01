@@ -97,10 +97,17 @@ class FaultAdapter:
     async def search(self, query: str, ctx: AdapterContext) -> list[Result]:
         if self._mode == "reconnect":
             # Google's `invalid_grant` — the only reliable revocation signal it
-            # emits, and the one `classify` maps to `needs_reconnect`. Synthetic
-            # until group 6 gives us a grant that can actually be revoked, but
-            # it exercises the real classifier and the real status transition
-            # rather than a test-only path.
+            # emits, and the one `classify` maps to `needs_reconnect`.
+            #
+            # No longer standing in for something unproven: the same journey has
+            # been run against a genuinely broken live grant (2026-08-01), where
+            # Google's own token endpoint answered `{"error": "invalid_grant",
+            # "error_description": "Bad Request"}` and the run reported
+            # `needs_reconnect` with a `reconnect_url`. This adapter is kept
+            # because it makes that journey **repeatable on demand** — for
+            # `make smoke`, for the demo, and without breaking a real grant to
+            # do it. `connections.service.invalidate_stored_token` is the other
+            # half: it breaks a real one reversibly.
             raise ProviderError(
                 provider="google",
                 code="invalid_grant",

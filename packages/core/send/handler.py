@@ -36,6 +36,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.connections import service as connections
 from core.db import session_scope
 from core.enums import ErrorClass, JobKind, ProviderKind, SendState
 from core.errors import ProviderError, classify
@@ -151,6 +152,12 @@ async def run_send(session: AsyncSession, job: ClaimedJob) -> None:
 
     applied = await _mark_delivered(send["id"], receipt)
     crash.seam(CrashPoint.AFTER_DELIVERY_COMMIT)
+
+    # A delivery is the strongest evidence a connection is healthy. After the
+    # delivery commit, never before: this is bookkeeping, and it must not sit
+    # anywhere on the path between the provider accepting and us recording that.
+    if send["connection_id"] is not None:
+        await connections.record_success(int(send["connection_id"]))
 
     if not applied:
         # The compare-and-swap lost: someone else already resolved this send —
@@ -531,6 +538,11 @@ def _request_for(send: dict[str, Any], draft: dict[str, Any]) -> SendRequest:
         # than resolved here, so a send always goes out from the connection it
         # was claimed against even if the user has since added another.
         connection_id=int(send["connection_id"]) if send.get("connection_id") else None,
+        # What a time-bounded probe measures backwards from. Committed before
+        # the provider call, so it is durable exactly when reconciliation needs
+        # it — and it is the *original* attempt, because `_commit_dispatch_
+        # attempt` COALESCEs rather than overwrites.
+        dispatched_at=send.get("dispatched_at"),
     )
 
 

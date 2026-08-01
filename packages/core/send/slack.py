@@ -17,10 +17,18 @@ channel**, with ``include_all_metadata=true`` and ``oldest = attempt - 60s``.
 silently vanishes from the response leaving only ``event_type`` — so the probe
 sees no fingerprint on a message it posted itself and concludes ABSENT.
 
-⏸️ Spike 2 (does the payload really round-trip?) is still unrun — no Slack token
-exists on this machine. If it comes back CONTRADICTED the fingerprint has no
-carrier at all, and the fallback is ``oldest``-bounded **text** matching on the
-one target channel, said out loud in the evidence string. Never `search.messages`.
+🔴 **``attempt`` means ``sends.dispatched_at``, not ``now()``.** See
+:func:`_window_start`. Writing that sentence down was not enough: the code said
+``now()`` for a whole phase while this docstring said otherwise, and every test
+passed because a fixture returns its message whatever ``oldest`` asks for.
+
+✅ Spike 2 — CONFIRMED live (2026-08-01) and again through this module's own
+credentials: ``metadata.event_payload`` round-trips through
+``conversations.history``, and ``include_all_metadata=true`` is genuinely
+load-bearing (without it the key reads back ``None``). Had it come back
+CONTRADICTED the fingerprint would have had no carrier, and the fallback was
+``oldest``-bounded **text** matching on the one target channel, said out loud in
+the evidence string. Never ``search.messages``.
 """
 
 from __future__ import annotations
@@ -81,7 +89,7 @@ class SlackSendProvider:
 
     async def probe_by_fingerprint(self, request: SendRequest) -> ProbeResult:
         client = _client(request)
-        oldest = datetime.now(UTC).timestamp() - PROBE_WINDOW_SECONDS
+        oldest = _window_start(request)
         try:
             messages = await client.channel_history(
                 request.recipient,
@@ -154,6 +162,43 @@ class SlackSendProvider:
     async def discard(self, request: SendRequest) -> None:
         """Nothing to tidy: a failed Slack send leaves no artifact behind."""
         return None
+
+
+def _window_start(request: SendRequest) -> float:
+    """``oldest`` for the probe — anchored to the **dispatch**, never to ``now()``.
+
+    🔴 Found by hand against the live workspace, and it is worth spelling out
+    because the tests could not see it. Reconciliation runs only once a lease
+    has expired — 300 seconds for a send — so it is *guaranteed* to run minutes
+    after the dispatch it is asking about. ``now() - 60s`` therefore describes a
+    window that closed long before the message was posted, and the probe could
+    never find its own message on any real timeline.
+
+    The failure had two faces, and the second is the dangerous one:
+
+    - **Quiet channel** — the window is empty, the probe answers INCONCLUSIVE
+      (correctly, an empty window proves nothing), and a fully recoverable send
+      parks in ``uncertain``. Observed live: a message posted at 01:59:05 and
+      confirmed present in ``conversations.history`` with its fingerprint
+      intact was reported as "no messages at all within 60s".
+    - **Busy channel** — other people's messages fill the window, none carries
+      our key, and the probe falls through to **ABSENT**. ABSENT means "safe to
+      dispatch", so the message is posted a second time. That is the exact
+      duplicate this whole design exists to prevent, and a channel with any
+      traffic at all is enough to trigger it.
+
+    ``dispatched_at`` is the right anchor rather than merely a working one: it
+    is committed immediately *before* the provider call, and
+    ``_commit_dispatch_attempt`` COALESCEs it, so across retries it stays the
+    first moment a message could possibly have gone out.
+
+    The fallback to ``now()`` covers a probe with no dispatch recorded, which is
+    a send that never reached the provider — nothing to find, and
+    :func:`core.send.handler.reconcile_send` returns ``NOT_SENT`` before
+    reaching here anyway.
+    """
+    anchor = request.dispatched_at or datetime.now(UTC)
+    return anchor.timestamp() - PROBE_WINDOW_SECONDS
 
 
 def _client(request: SendRequest) -> SlackClient:

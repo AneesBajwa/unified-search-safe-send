@@ -104,6 +104,18 @@ class SendRequest:
     #: instance because :func:`get_provider` returns one instance per process
     #: and a user may have several connections to the same provider.
     connection_id: int | None = None
+    #: 🔴 When this send was dispatched — ``sends.dispatched_at``, the value
+    #: committed immediately before the provider call.
+    #:
+    #: A time-bounded probe must anchor its window **here and not to
+    #: ``now()``**. Reconciliation runs only after a lease expires, so by
+    #: construction it runs minutes after the dispatch it is asking about; a
+    #: window measured backwards from the current clock is guaranteed to close
+    #: before the message it is looking for. See ``core.send.slack``.
+    #:
+    #: ``None`` only before the first dispatch, when there is nothing to
+    #: reconcile.
+    dispatched_at: datetime | None = None
 
 
 @dataclass(frozen=True)

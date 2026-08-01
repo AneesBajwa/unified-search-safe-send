@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -73,7 +74,13 @@ async def _connection(provider: str) -> int:
     return row.id
 
 
-def _request(connection_id: int, *, channel: ProviderKind, draft_id: str | None = None):
+def _request(
+    connection_id: int,
+    *,
+    channel: ProviderKind,
+    draft_id: str | None = None,
+    dispatched_at: datetime | None = None,
+):
     return SendRequest(
         fingerprint=KEY,
         channel=channel,
@@ -83,6 +90,7 @@ def _request(connection_id: int, *, channel: ProviderKind, draft_id: str | None 
         body="Confirming for Thursday.",
         provider_draft_id=draft_id,
         connection_id=connection_id,
+        dispatched_at=dispatched_at,
     )
 
 
@@ -288,6 +296,99 @@ async def test_the_slack_probe_asks_history_and_passes_include_all_metadata(
     assert not search.called, (
         "reconciliation used search.messages, whose index is eventually "
         "consistent — a false ABSENT there double-sends (risks.md R5)"
+    )
+
+
+def _oldest_sent_to_slack(history: respx.Route) -> float:
+    """The `oldest` Slack actually received, as an epoch float."""
+    from urllib.parse import parse_qs
+
+    body = parse_qs(history.calls[0].request.content.decode())
+    return float(body["oldest"][0])
+
+
+@respx.mock
+async def test_the_probe_window_is_anchored_to_the_dispatch_not_to_now(
+    configured: None,
+) -> None:
+    """🔴 The bug this file could not see, found by hand against a live workspace.
+
+    ``oldest`` was ``now() - 60s``. Reconciliation runs *only* after a lease
+    expires — 300 seconds for a send — so the window had always closed before
+    the message it was hunting for was ever posted. The probe could not find its
+    own message on any real timeline.
+
+    Every test here passed anyway, and the reason is worth keeping: a `respx`
+    route returns its canned message whatever ``oldest`` says. So the assertion
+    that matters is not "did we find it" — a fixture always lets you find it —
+    but **what value went out on the wire**.
+
+    Two failures came out of the one line. On a quiet channel the window is
+    empty, the probe answers INCONCLUSIVE, and a recoverable send parks in
+    `uncertain`. On a channel with any traffic the window is full of other
+    people's messages, none carries our key, and the probe answers **ABSENT** —
+    which means "safe to dispatch", and the message goes out twice.
+    """
+    connection_id = await _connection("slack")
+    history = respx.post(f"{SLACK_BASE}/conversations.history").mock(
+        return_value=httpx.Response(200, json={"ok": True, "messages": []})
+    )
+
+    # A send dispatched an hour ago: exactly the shape reconciliation sees,
+    # since it cannot run until the lease has expired.
+    dispatched = datetime.now(UTC) - timedelta(hours=1)
+    await SlackSendProvider().probe_by_fingerprint(
+        _request(connection_id, channel=ProviderKind.SLACK, dispatched_at=dispatched)
+    )
+
+    oldest = _oldest_sent_to_slack(history)
+    assert oldest == pytest.approx(dispatched.timestamp() - 60, abs=1.0), (
+        "the probe window is measured from the wrong clock: it must start 60s "
+        "before the dispatch, not 60s before now, or it can never contain the "
+        "message it was posted to find"
+    )
+    assert oldest < dispatched.timestamp(), "the window opens after the dispatch"
+
+
+@respx.mock
+async def test_a_dispatched_message_inside_the_window_is_found(
+    configured: None,
+) -> None:
+    """The other half: the anchor is right *and* the message is matched.
+
+    Anchoring alone would be satisfied by a window that never closes, so this
+    pins that a message posted a second after the dispatch is inside it.
+    """
+    connection_id = await _connection("slack")
+    dispatched = datetime.now(UTC) - timedelta(minutes=30)
+    posted_ts = f"{dispatched.timestamp() + 1:.6f}"
+    history = respx.post(f"{SLACK_BASE}/conversations.history").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "ok": True,
+                "messages": [
+                    {
+                        "ts": posted_ts,
+                        "text": "Confirming for Thursday.",
+                        "metadata": {
+                            "event_type": "unified_search_safe_send",
+                            "event_payload": {"idempotency_key": KEY},
+                        },
+                    }
+                ],
+            },
+        )
+    )
+
+    probe = await SlackSendProvider().probe_by_fingerprint(
+        _request(connection_id, channel=ProviderKind.SLACK, dispatched_at=dispatched)
+    )
+
+    assert probe.verdict is ProbeVerdict.FOUND
+    assert probe.provider_message_id == f"C024BE91L:{posted_ts}"
+    assert _oldest_sent_to_slack(history) < float(posted_ts), (
+        "the message was posted outside the window we asked for"
     )
 
 

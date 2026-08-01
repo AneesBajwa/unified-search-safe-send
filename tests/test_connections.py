@@ -538,6 +538,184 @@ async def test_a_revoked_grant_surfaces_on_search_and_survives_a_reconnect(
     ) == "ya29.after-reconnect"
 
 
+# ---------------------------------------------------------------------------
+# Connection health — the other half of `mark_needs_reconnect`
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def source_needing_a_connection() -> Iterator[str]:
+    """A source named for a provider, so ``plan_search`` attaches that
+    provider's connection to the run — which is the condition under test.
+
+    Deliberately does not touch the token: what is being asserted is the
+    bookkeeping that follows a successful run, not the credential path, and a
+    fake that refreshed would put a second write on the row and blur which one
+    did the work.
+    """
+    from datetime import UTC, datetime
+
+    from core.adapters import registry
+    from core.adapters.types import AdapterContext, Result
+    from core.enums import SourceMode
+
+    class HealthyGmail:
+        source = "gmail"
+
+        async def search(self, query: str, ctx: AdapterContext) -> list[Result]:
+            return [
+                Result(
+                    source="gmail",
+                    id="msg-1",
+                    title=f"{query} — re: renewal",
+                    snippet="The provider answered, so the credential works.",
+                    url="https://mail.google.com/mail/u/0/#all/msg-1",
+                    timestamp=datetime.now(UTC).isoformat(),
+                )
+            ]
+
+    registry.register(
+        "gmail", HealthyGmail, participates_by_default=False,
+        mode=SourceMode.LIVE, requires_connection=True,
+    )
+    try:
+        yield "gmail"
+    finally:
+        from core.adapters import live
+
+        registry.clear()
+        live.register_defaults()
+
+
+async def _connection_health(connection_id: int) -> dict[str, object]:
+    from sqlalchemy import text
+
+    async with session_scope() as session:
+        row = (
+            await session.execute(
+                text(
+                    """
+                    SELECT status::text AS status, last_success_at,
+                           last_error_class::text AS last_error_class, last_error_detail
+                      FROM connections WHERE id = :id
+                    """
+                ),
+                {"id": connection_id},
+            )
+        ).mappings().first()
+    assert row is not None
+    return dict(row)
+
+
+async def _record_past_failure(connection_id: int, status: str = "active") -> None:
+    from sqlalchemy import text
+
+    async with session_scope() as session:
+        await session.execute(
+            text(
+                """
+                UPDATE connections
+                   SET status = CAST(:status AS conn_status),
+                       last_error_class = 'transient',
+                       last_error_detail = 'Gmail returned 503 at 04:11',
+                       last_success_at = NULL
+                 WHERE id = :id
+                """
+            ),
+            {"id": connection_id, "status": status},
+        )
+        await session.commit()
+
+
+async def _run_search_against(user_id: int, source: str) -> dict[str, object]:
+    from core.adapters import orchestrator
+    from core.jobs import runtime
+
+    async with session_scope() as session:
+        plan = await orchestrator.plan_search(
+            session, user_id=user_id, query="renewal", sources=[source]
+        )
+        await session.commit()
+
+    while (await runtime.run_once(limit=5)).claimed:
+        pass
+
+    snapshot = await orchestrator.load_snapshot(search_id=plan.search_id, user_id=user_id)
+    assert snapshot is not None
+    return dict(snapshot.sources[0])
+
+
+async def test_a_successful_run_records_the_connection_as_healthy(
+    source_needing_a_connection: str,
+) -> None:
+    """🔴 ``mark_needs_reconnect`` had no counterpart, and nothing called
+    ``mark_success``.
+
+    Found by hand, not by the suite: two live searches against a real Gmail
+    mailbox and a real Slack workspace both returned results, and both
+    connection rows still read ``last_success_at = NULL``. The whole suite was
+    green while that was true, because every existing test asserts the *run*
+    status and none of them looked at the row the connections page renders.
+
+    Two separate lies came out of the same missing call. ``last_success_at``
+    never moved, so a working connection displayed as never used; and nothing
+    ever cleared ``last_error_detail``, so one transient 503 sat next to an
+    `active` badge for the life of the connection.
+    """
+    user_id = await make_user()
+    connection_id = await _connect_google(user_id)
+    await _record_past_failure(connection_id)
+
+    run = await _run_search_against(user_id, source_needing_a_connection)
+    assert run["status"] == "done"
+    assert run["connection_id"] == connection_id, (
+        "the run carried no connection, so this asserts nothing — "
+        "`requires_connection` or the source name is wrong"
+    )
+
+    health = await _connection_health(connection_id)
+    assert health["last_success_at"] is not None, (
+        "a provider accepted this credential and the connection still reports "
+        "it has never succeeded"
+    )
+    assert health["last_error_detail"] is None, (
+        "a stale error is still displayed next to a connection that just worked"
+    )
+    assert health["last_error_class"] is None
+    assert health["status"] == "active"
+
+
+async def test_a_revoked_connection_is_not_quietly_cleared_by_a_success() -> None:
+    """The guard inside ``mark_success``: ``WHERE status <> 'needs_reconnect'``.
+
+    Only a real reconnect clears a revoked grant — otherwise a success arriving
+    from anywhere would flip the connection back to `active` and take away the
+    one action that fixes it.
+
+    Called **directly** rather than driven through a search, and the reason is
+    worth stating: ``plan_search`` attaches only `active` connections, so a
+    revoked one never reaches a run in the first place. A test that went the
+    long way round would pass without the guard existing at all — it would be
+    asserting the filter in ``_active_connections``, not this. Two independent
+    defences, and this one covers the day a caller arrives from somewhere else.
+    """
+    user_id = await make_user()
+    connection_id = await _connect_google(user_id)
+    async with session_scope() as session:
+        await store.mark_needs_reconnect(session, connection_id, "invalid_grant")
+        await session.commit()
+
+    await service.record_success(connection_id)
+
+    health = await _connection_health(connection_id)
+    assert health["status"] == "needs_reconnect", (
+        "a success cleared a revoked grant; the user would lose the reconnect "
+        "action while the grant is still dead"
+    )
+    assert health["last_success_at"] is None
+    assert health["last_error_detail"] == "invalid_grant"
+
+
 def test_a_grant_never_reprs_its_tokens() -> None:
     """Task 6.2b. This object lives for about four lines between a provider
     response and an encrypted column — and those four lines are exactly where a

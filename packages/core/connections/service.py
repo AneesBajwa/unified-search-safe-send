@@ -165,6 +165,37 @@ async def _should_force_consent(
     return current is None or current.refresh_token_ct is None
 
 
+async def record_success(connection_id: int) -> None:
+    """The counterpart :func:`store.mark_needs_reconnect` never had.
+
+    Called wherever a provider has just accepted this connection's credential —
+    a completed adapter run, a delivered send. Without it ``last_success_at``
+    stays NULL for the life of a working connection and a single transient
+    failure leaves ``last_error_detail`` displayed next to an `active` badge
+    forever, because nothing else clears those columns. Found by watching two
+    genuinely successful live runs leave the row untouched; every test in the
+    suite passed while it did.
+
+    **Best effort, and its own transaction.** It runs after the work it reports
+    on has already committed, so a failure here must not fail that work — and
+    connection bookkeeping raising inside an adapter run would be recorded
+    against the *run*, which would then report a provider error for a call the
+    provider answered.
+
+    ``mark_success`` itself carries the one rule that matters: its
+    ``WHERE status <> 'needs_reconnect'`` means only a real reconnect clears a
+    revoked grant, never a stray success on another credential.
+    """
+    try:
+        async with session_scope() as session:
+            await store.mark_success(session, connection_id)
+            await session.commit()
+    except Exception:  # see the docstring: bookkeeping never fails the work
+        logger.warning(
+            "could not record success for connection %s", connection_id, exc_info=True
+        )
+
+
 # ---------------------------------------------------------------------------
 # Test / demo helper
 # ---------------------------------------------------------------------------

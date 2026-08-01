@@ -35,6 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import core.send.handler  # noqa: F401
 from core.adapters import live
 from core.adapters.orchestrator import close_search_if_complete, execute_adapter_run
+from core.connections import service as connections
 from core.db import session_scope
 from core.enums import ErrorClass, JobKind
 from core.errors import classify
@@ -96,6 +97,16 @@ async def run_adapter(session: AsyncSession, job: ClaimedJob) -> None:
         # honesty is exactly the thing that must not be lost in that rollback.
         await _record_run_failure(run.id, run.search_id, exc, job)
         raise
+
+    # The provider accepted this connection's credential, so the connection is
+    # demonstrably healthy right now. This is the only routine signal of that —
+    # `mark_needs_reconnect` had no counterpart, so a connection that failed
+    # once carried its `last_error_detail` forever and `last_success_at` never
+    # moved off NULL. `WHERE status <> 'needs_reconnect'` inside `mark_success`
+    # is what stops a revoked grant being cleared by anything but a real
+    # reconnect. Sources with no connection (web) skip it.
+    if run.connection_id is not None:
+        await connections.record_success(run.connection_id)
 
     await close_search_if_complete(run.search_id)
 
