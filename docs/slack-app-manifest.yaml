@@ -1,0 +1,65 @@
+# Slack app manifest for Unified Search & Safe Send.
+#
+# Slack → Your Apps → Create New App → From an app manifest → paste this.
+# Then replace REPLACE_ME below with your public HTTPS tunnel host and add the
+# same URL as the redirect URI in OAuth & Permissions.
+#
+# Shipped as a manifest rather than a distributed app on purpose: a reviewer
+# stands up their own internal app in about thirty seconds, in their own
+# workspace, with their own tokens. Nothing here is shared.
+#
+# 🔴 The scope split is the load-bearing part. `search:read` is a **user** scope.
+# A bot token sent to `search.messages` is rejected with
+# `not_allowed_token_type` — an error that names nothing and reads like a bug in
+# this app. So search runs on the user token, which also means it sees exactly
+# the channels the authorizing user sees; posting runs on the bot token, so a
+# message from this app is attributable to the app rather than to a person.
+#
+# ⚠️ Slack grants are additive and cannot be narrowed. Removing a scope here and
+# re-authorizing still returns a token carrying it — only uninstalling the app
+# clears it. That is why the app's scope pre-flight is a subset test that
+# reports rather than blocks.
+
+display_information:
+  name: Unified Search & Safe Send
+  description: Unified search across Gmail, Slack and the web, with a confirm-before-send gate.
+  background_color: "#1b46c8"
+
+features:
+  bot_user:
+    display_name: Unified Search
+    always_online: false
+
+oauth_config:
+  redirect_urls:
+    # Must match byte-for-byte, including the trailing path. No wildcards.
+    - https://REPLACE_ME.trycloudflare.com/v1/connections/callback/slack
+  scopes:
+    # The authorizing person's own token. Search only.
+    user:
+      - search:read
+    bot:
+      # Post a message.
+      - chat:write
+      # Post to a public channel without joining it first, which removes most
+      # `not_in_channel` failures before they can happen.
+      - chat:write.public
+      # Resolve a channel id to a name, so the confirm screen can show
+      # "#acme-renewal" instead of "C024BE91L".
+      - channels:read
+      # The reconciliation probe after a crash mid-send, and the degraded
+      # search fallback.
+      - channels:history
+      - channels:join
+      # Read back `metadata.event_payload` on a posted message. Requirement is
+      # documented inconsistently by Slack, so it is requested and verified
+      # empirically rather than assumed.
+      - metadata.message:read
+
+settings:
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false
+  # No event subscriptions and no interactivity: this app never receives a
+  # callback from Slack outside the OAuth redirect. Fewer inbound surfaces is
+  # fewer things to authenticate.
