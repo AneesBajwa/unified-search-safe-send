@@ -72,6 +72,46 @@ def _lifespan_for(run_worker_inline: bool) -> Any:
     return lifespan
 
 
+#: The port the Vite dev server is forwarded on. Matches `forwardPorts` in
+#: `.devcontainer/devcontainer.json`.
+SPA_FORWARDED_PORT = "5173"
+
+
+def _cors_origins() -> list[str]:
+    """Which origins the console may be served from.
+
+    🔴 **A Codespace's origin is only knowable at runtime**, and that is why
+    this is a function rather than one `os.getenv`.
+
+    GitHub forwards a port into the *hostname* —
+    `https://<name>-5173.app.github.dev` — so the SPA is cross-origin from the
+    API there, and the name is generated per Codespace. The obvious fix, putting
+    `${containerEnv:CODESPACE_NAME}` into `devcontainer.json`, **does not work**:
+    that substitution runs before Codespaces injects its own variables, so the
+    value arrives as the literal string `${containerEnv:CODESPACE_NAME}` and
+    every request the console makes is rejected. Verified by booting one and
+    reading the value back.
+
+    The variables *are* present in a login shell, which is where the API is
+    started from — so it derives its own origin and needs nothing configured.
+    Outside a Codespace both are absent and this is exactly the old behaviour.
+    """
+    origins = [
+        origin.strip()
+        for origin in os.getenv(
+            "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+        ).split(",")
+        if origin.strip()
+    ]
+    codespace = os.getenv("CODESPACE_NAME")
+    domain = os.getenv("GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN")
+    if codespace and domain:
+        forwarded = f"https://{codespace}-{SPA_FORWARDED_PORT}.{domain}"
+        if forwarded not in origins:
+            origins.append(forwarded)
+    return origins
+
+
 def create_app(*, run_worker_inline: bool | None = None) -> FastAPI:
     """Build the app. One factory, so every caller gets the same wiring.
 
@@ -94,13 +134,7 @@ def create_app(*, run_worker_inline: bool | None = None) -> FastAPI:
 
     # The SPA is served from a different origin in every environment (Vite on
     # 5173 locally, Firebase Hosting in production), so it is always cross-origin.
-    origins = [
-        o.strip()
-        for o in os.getenv(
-            "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
-        ).split(",")
-        if o.strip()
-    ]
+    origins = _cors_origins()
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,

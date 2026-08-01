@@ -101,3 +101,35 @@ def test_the_token_keyring_is_generated_per_run_and_is_not_a_real_one() -> None:
     assert not os.path.exists(os.environ["TOKEN_KEYRING_PATH"]), (
         "the test run can see a real mounted keyring"
     )
+
+
+# ---------------------------------------------------------------------------
+# Where the console is allowed to be served from
+# ---------------------------------------------------------------------------
+
+
+def test_a_codespace_origin_is_derived_rather_than_configured() -> None:
+    """🔴 Verified against a booted Codespace, not reasoned about.
+
+    GitHub forwards a port into the *hostname*, so the console is cross-origin
+    from the API there and the host name is generated per Codespace. Putting
+    `${containerEnv:CODESPACE_NAME}` in `devcontainer.json` looks right and is
+    not: that substitution runs before Codespaces injects its variables, so the
+    value arrives as the literal string and the API rejects every request the
+    console makes.
+    """
+    from api.main import _cors_origins
+
+    assert not any(".app.github.dev" in origin for origin in _cors_origins())
+
+    os.environ["CODESPACE_NAME"] = "literate-spork-example"
+    os.environ["GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN"] = "app.github.dev"
+    try:
+        origins = _cors_origins()
+    finally:
+        del os.environ["CODESPACE_NAME"]
+        del os.environ["GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN"]
+
+    assert "https://literate-spork-example-5173.app.github.dev" in origins
+    # The localhost pair still works, so `make dev` inside a Codespace does too.
+    assert "http://localhost:5173" in origins

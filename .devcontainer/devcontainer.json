@@ -30,18 +30,15 @@
     // rejects http://localhost redirect URLs outright).
     "RUN_WORKER_INLINE": "1",
     "DEV_ROUTES": "1",
-    // 🔴 The SPA is served from a *different* forwarded host than the API in
-    // Codespaces — GitHub puts the port in the hostname
-    // (`https://<name>-5173.app.github.dev`) — so it is cross-origin there, and
-    // the localhost pair alone would have the API reject every request the
-    // console makes. The comment here used to say exactly that while the value
-    // below listed only localhost, which is the shape of a bug nobody reads
-    // twice.
+    // 🔴 The forwarded SPA origin is NOT added here, and the reason is worth
+    // recording: `${containerEnv:CODESPACE_NAME}` substitution runs *before*
+    // Codespaces injects its own variables, so the value arrives as that
+    // literal string and the API rejects every request the console makes.
+    // Verified by booting a Codespace and reading the value back.
     //
-    // `CODESPACE_NAME` and `GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN` are set by
-    // Codespaces and empty everywhere else, where the trailing entry is
-    // harmless and the localhost pair does the work.
-    "CORS_ORIGINS": "http://localhost:5173,http://127.0.0.1:5173,https://${containerEnv:CODESPACE_NAME}-5173.${containerEnv:GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}"
+    // `apps/api/main.py` derives it instead, from the variables that are
+    // genuinely present in the login shell the API is started from.
+    "CORS_ORIGINS": "http://localhost:5173,http://127.0.0.1:5173"
   },
 
   "onCreateCommand": "curl -LsSf https://astral.sh/uv/install.sh | sh",
