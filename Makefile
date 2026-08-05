@@ -8,7 +8,7 @@
 #   make schema  regenerate the console's types from OpenAPI
 #   make smoke   end to end through the REST API, no UI involved
 #   make image   the linux/amd64 image builds AND serves /health
-#   make deploy  Cloud Run — blocked on billing, and says so loudly
+#   make deploy  Cloud Run api + worker + Cloud Tasks + Scheduler sweep
 #
 # `make smoke` is the important one: it is the reviewer's own "run it entirely
 # through the API" check, run continuously by us instead of once by them.
@@ -137,8 +137,8 @@ image: ## Cross-build the linux/amd64 image and prove it SERVES, not just builds
 	done
 	@docker image inspect $(IMAGE) --format '    size: {{.Size}} bytes ({{.Architecture}})'
 
-deploy: ## Cloud Run. BLOCKED on GCP billing today — fails loudly, never silently
-	PROJECT_ID=$${PROJECT_ID:-unified-search-1785530576} bash scripts/deploy/deploy.sh
+deploy: ## Cloud Run api + worker + tasks + scheduler. Billing preflight fails loudly, never silently
+	PROJECT_ID=$${PROJECT_ID:-unified-search-1785899621} bash scripts/deploy/deploy.sh
 
 clean: ## Remove the stack and its volumes
 	docker compose down -v

@@ -32,5 +32,5 @@ async def trigger_work() -> dict[str, Any]:
 
 @router.post("/sweep")
 async def trigger_sweep() -> dict[str, Any]:
-    """The same pass the worker service's ``/sweep`` runs."""
-    return (await sweep()).as_dict()
+    """The same pass the worker service's ``/sweep`` runs: recover, then drain."""
+    return {"sweep": (await sweep()).as_dict(), "work": (await run_once()).as_dict()}

@@ -73,10 +73,22 @@ async def work() -> dict[str, Any]:
 
 @app.post("/sweep")
 async def sweep_endpoint() -> dict[str, Any]:
-    """Reclaim leases orphaned by a crashed worker.
+    """Reclaim orphaned leases, then drain whatever is due.
 
-    ``held_lock: false`` means another sweeper was already running and this call
-    did nothing — reported rather than hidden, so a scheduler misconfiguration
-    that fires two sweeps a second is visible instead of merely wasteful.
+    The drain half is load-bearing, not tidiness: the API's Cloud Tasks nudge
+    fires only on *user-initiated* commits, so a job the worker itself
+    rescheduled — a transient send waiting out its backoff, a reconcile
+    follow-up — has nothing else to wake the worker for it. Design D4 always
+    said the scheduler tick covers "retries … scheduled sends"; without
+    ``run_once`` here, a backoff retry on Cloud Run stalls until an unrelated
+    user action happens to nudge ``/work``. Found live in phase 6 by retrying
+    a seeded transient send and watching its job sit ``ready`` forever.
+
+    ``sweep.held_lock: false`` means another sweeper was already running and
+    the sweep half did nothing — reported rather than hidden, so a scheduler
+    misconfiguration that fires two sweeps a second is visible instead of
+    merely wasteful. The drain half is SKIP LOCKED and needs no singleton.
     """
-    return (await sweep()).as_dict()
+    swept = (await sweep()).as_dict()
+    worked = (await run_once()).as_dict()
+    return {"sweep": swept, "work": worked}

@@ -8,9 +8,11 @@ reviewed, explicitly confirmed, and idempotent under retry.
 > connections, history and the seed dataset all work end to end against **real
 > Gmail and real Slack**. The whole loop is drivable with `curl` and no UI
 > process — see [Driving it with curl](#driving-it-with-curl).
-> **Deployment to Cloud Run is written and blocked on GCP billing**; see
-> [What is not here yet](#what-is-not-here-yet). Design and task breakdown live
-> in `openspec/changes/unified-search-safe-send/` in the parent workspace.
+> **Deployed:** the API and worker run on Cloud Run (`us-east4`), the SPA on
+> Firebase Hosting, the database on Neon — all inside free tiers on a Free
+> Trial billing account. See [Deployment](#deployment). Design and task
+> breakdown live in `openspec/changes/unified-search-safe-send/` in the parent
+> workspace.
 
 ## Architecture
 
@@ -590,19 +592,84 @@ Stated rather than discovered. The reasoning for each is in
 - **The web adapter is a labelled mock by default** — see
   [Web search](#web-search).
 
+## Deployment
+
+Deployed 2026-08-04 and verified live. The moving parts:
+
+```
+SPA      Firebase Hosting (Spark)   https://unified-search-1785899621.web.app
+API      Cloud Run (public)         https://api-88631762875.us-east4.run.app
+Worker   Cloud Run (PRIVATE)        https://worker-88631762875.us-east4.run.app
+DB       Neon aws-us-east-1         pooled endpoint, PG 17
+Hot path Cloud Tasks queue `work`   API nudges worker after each job-creating commit
+Sweep    Cloud Scheduler `*/15`     OIDC POST to /sweep — recovers stale
+                                    leases, then DRAINS due jobs (backoff
+                                    retries have no other wake-up on Cloud Run)
+Secrets  Secret Manager             database-url, both OAuth client secrets,
+                                    token-keyring (mounted at /secrets/keyring)
+```
+
+What was verified on the deployed URLs, not locally: `/health` does a real
+Neon round trip; a search POSTed to the API is picked up by a **Cloud Tasks
+push** to the private worker with no other request in flight; SSE streams
+through Cloud Run unbuffered (and polling never depended on it); a **full
+Gmail OAuth connect** from the hosted SPA's authorize URL through the deployed
+callback, ending in an `active` connection; a live Gmail search returning real
+messages next to the labelled web mock; **two genuine Google accounts on one
+user** — one search, two independent live Gmail runs (4 and 10 results), each
+behind its own per-account chip; and the seeded history — all seven send
+states including `uncertain` — rendered from the deployed database.
+
+The $0 posture, in order of load-bearing: a **Free Trial billing account,
+never upgraded** (auto-closes at $300/90 days with no auto-conversion — the
+only mathematical guarantee); a **$1 spend-cap budget** (enforced, not
+alerts-only) scoped to Cloud Run, plus a $1 gross-cost alert budget across all
+services; `--max-instances=2` everywhere (the default is 100);
+`--min-instances=0` and request-based billing, so both services scale to zero;
+only five services enabled (`run`, `artifactregistry`, `secretmanager`,
+`cloudscheduler`, `cloudtasks`) and **never `containerscanning`** ($0.26 per
+push); images cross-built locally with `docker buildx build --platform
+linux/amd64 --push` — never `gcloud run deploy --source`, which drags in Cloud
+Build and buildpack images 2–3× larger; the sweep hits the worker *service*
+endpoint, never a Cloud Run Job (1-minute minimum billing per execution); the
+SPA is on Hosting (Spark), not Cloud Run (1 GiB egress cap) and not "App
+Hosting" (Blaze-only).
+
+The hot path is `core/jobs/nudge.py`: after a job-creating commit the API
+creates one Cloud Tasks task targeting the worker's `/work` with an OIDC
+token. Three env vars turn it on (`CLOUD_TASKS_QUEUE`, `WORKER_URL`,
+`TASKS_OIDC_SERVICE_ACCOUNT`); unset — local dev, Codespaces, the test suite —
+it is a no-op and the inline loop polls instead. A failed nudge is logged and
+swallowed: the job row is already committed and the sweep will find it, so a
+lost nudge costs latency, never correctness.
+
+Reproduction is `scripts/deploy/bootstrap-gcp.sh` (one-time project setup)
+then `scripts/deploy/deploy.sh` (build, push, both services). Register the
+OAuth redirect URIs against the API URL afterwards — exact match including
+scheme and no trailing slash: `…/v1/connections/callback/gmail` and
+`…/v1/connections/callback/slack`.
+
+Because the Google OAuth app is published but **unverified**, every first
+grant walks through the "Google hasn't verified this app" interstitial —
+Advanced → *Go to api-….run.app (unsafe)*:
+
+![unverified-app interstitial](docs/images/oauth-unverified-interstitial.jpg)
+![advanced revealed](docs/images/oauth-unverified-advanced.jpg)
+
+⚠️ Two dates worth writing down: the Free Trial billing account opened
+**2026-08-04** and auto-closes at $300 or 90 days, whichever comes first; and
+Google **deletes OAuth clients idle for six months** — if no grant has
+happened by **2027-01-31**, expect to recreate the client and re-register the
+redirect URIs.
+
 ## What is not here yet
 
-- **Deployment.** Cloud Run + Firebase Hosting is designed and scripted
-  (`make deploy`), and blocked on GCP billing — the free trial ended, and
-  staying off a paid account is the only mathematical guarantee of $0. Nothing
-  here has been verified against a deployed URL.
+- **A week of deployed idle.** The scale-to-zero configuration is verified
+  (`min-instances=0`, request-based billing); the "billing still shows $0
+  after a week of idle" check needs the week to pass.
 - **Playwright.** The console has unit tests for its most dangerous component
   and a boundary test in Python; the confirm flow end to end is still held by
   hand verification.
-- **A second real Gmail account.** The multi-account path is implemented and
-  tested — two grants on one provider produce two independent adapter runs with
-  per-account status and a per-account reconnect — but it has been demonstrated
-  with one real account plus a locally created second grant, not two mailboxes.
 
 Phase-by-phase reasoning, including every defect found by using the product
 rather than by testing it, lives under

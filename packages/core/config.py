@@ -46,6 +46,14 @@ class Settings(BaseSettings):
     # expires — the other order means the sweeper reconciles a live send.
     send_deadline_seconds: int = 120
 
+    # ------------------------------------------------- Cloud Tasks (D4 hot path)
+    # All three empty locally (the inline loop polls); all three set on Cloud
+    # Run, where the API nudges the worker with a Cloud Tasks push after each
+    # job-creating commit. See core/jobs/nudge.py.
+    cloud_tasks_queue: str = ""  # projects/<p>/locations/<l>/queues/<q>
+    worker_url: str = ""  # the worker service's base URL
+    tasks_oidc_service_account: str = ""  # SA with run.invoker on the worker
+
     # Dev-only surface: the `/dev` routes the smoke test drives, and the
     # `fault:` seam in the adapter handler. Set DEV_ROUTES=0 on Cloud Run.
     # Task group 9 replaces these with the real authenticated public API.

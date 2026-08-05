@@ -39,6 +39,7 @@ from core.connections.state import StateInvalid
 from core.connections.store import ReconnectMismatch
 from core.db import session_scope
 from core.enums import ProviderKind
+from core.jobs.nudge import nudge_worker
 from core.security import api_keys
 from core.send import service
 from fastapi import APIRouter, Body, Query, Response
@@ -510,6 +511,7 @@ async def create_search(caller: CallerDep, body: CreateSearchRequest) -> dict[st
         except registry.UnknownSource as exc:
             raise ApiError("recipient_invalid", str(exc)) from exc
         await session.commit()
+    await nudge_worker()
     return {
         "search_id": str(plan.search_id),
         "query": plan.query,
@@ -645,6 +647,7 @@ async def rerun_search(caller: CallerDep, search_id: uuid.UUID) -> dict[str, Any
             session, user_id=caller.user_id, query=str(query)
         )
         await session.commit()
+    await nudge_worker()
     return {
         "search_id": str(plan.search_id),
         "query": plan.query,
@@ -955,6 +958,7 @@ async def send_draft(
             confirmed_sha256=body.confirmed_sha256 if body else None,
         )
         await session.commit()
+    await nudge_worker()
     response.status_code = outcome.status
     response.headers["Idempotent-Replayed"] = "true" if outcome.idempotent_replay else "false"
     return outcome.payload
@@ -1005,6 +1009,7 @@ async def retry_send(caller: CallerDep, send_id: uuid.UUID) -> dict[str, Any]:
     async with session_scope() as session:
         payload = await service.operator_retry(session, send_id, user_id=caller.user_id)
         await session.commit()
+    await nudge_worker()
     return payload
 
 
@@ -1037,4 +1042,5 @@ async def resolve_send(
             note=body.note,
         )
         await session.commit()
+    await nudge_worker()
     return payload
