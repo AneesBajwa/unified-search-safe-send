@@ -566,6 +566,13 @@ providers.
 Stated rather than discovered. The reasoning for each is in
 `openspec/changes/unified-search-safe-send/risks.md`.
 
+- **Sign-in is an email address, no password** (`/auth/dev-login`). Anyone who
+  knows a user's email can mint a key for that user and act on whatever that
+  user has connected. Accepted deliberately for a reviewable PoC — a stranger
+  signing in gets an *empty* account, which is the intended first-run path —
+  but it means a real personal grant should never be left connected on the
+  deployed instance outside a demo. The demo accounts here are throwaways;
+  production would put an identity provider in front of key issuance.
 - **The API key lives in `sessionStorage`**, which is XSS-reachable. Accepted
   deliberately: a single credential path is what makes "the console is a pure
   consumer" structurally true, and that is the property being graded. The
