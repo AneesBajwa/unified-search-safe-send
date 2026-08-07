@@ -1,44 +1,40 @@
 # Unified Search & Safe Send
 
-Unified multi-provider search (Gmail, Slack, web) behind a pluggable adapter
-layer, plus a safe-send gate where every outbound message is drafted,
-reviewed, explicitly confirmed, and idempotent under retry.
+Search Gmail, Slack and the web from one query, then reply through a gate that
+will not let you send twice or send by accident.
+
+**Live: <https://unified-search-1785899621.web.app>** — no account needed.
+
+Two things are the product: a **pluggable adapter layer** where each source runs
+as an independent background worker returning one common shape, and a
+**safe-send gate** where nothing leaves without an explicit confirmation over
+exactly what will be sent. The unified inbox is built on top of them.
+
+---
 
 ## Try it
 
-**<https://unified-search-1785899621.web.app>** — live, no account needed.
+Sign-in is an address, not a password. Three states are one click apart:
 
-Sign-in is an address, not a password, and the screen offers the three states
-worth seeing:
-
-| Click | What you land in |
+| Click | What you get |
 |---|---|
-| **Sign in** (`console@example.test`) | A throwaway Gmail and a Slack workspace already connected — run a search and watch all three sources report for themselves |
-| **Sign in as the seeded demo account** | History and detail in *every* status: delivered, failed, in-flight, and the amber `uncertain` |
-| **Sign in as a brand-new user** | Nothing connected — what a first-time user actually meets, with web search still returning results |
+| **Sign in** (`console@example.test`) | A throwaway Gmail and a Slack workspace already connected — run a search and watch each source report for itself |
+| **Sign in as the seeded demo account** | History and detail in every status: delivered, failed, in-flight, and the amber `uncertain` |
+| **Sign in as a brand-new user** | Nothing connected — the real first-run state, with web search still returning results |
 
-Connecting a provider adds live data; it is never the price of entry, and you
-are never asked to connect anything personal. The same loop runs with no UI at
-all — see [Driving it with curl](#driving-it-with-curl).
-
-> **Status.** The API, the console, the adapters, the send gate, OAuth
-> connections, history and the seed dataset all work end to end against **real
-> Gmail and real Slack**. The whole loop is drivable with `curl` and no UI
-> process — see [Driving it with curl](#driving-it-with-curl).
-> **Deployed:** the API and worker run on Cloud Run (`us-east4`), the SPA on
-> Firebase Hosting, the database on Neon — all inside free tiers on a Free
-> Trial billing account. See [Deployment](#deployment). Design and task
-> breakdown live in `openspec/changes/unified-search-safe-send/` in the parent
-> workspace.
+You are never asked to connect a personal account, and the same loop runs with
+no UI at all — see [Driving it with curl](#driving-it-with-curl).
 
 ## Architecture
 
-Two things are the product; the unified inbox is one thing built on top of them.
+```
+packages/core/   the reusable module: adapters, send gate, jobs, connections
+apps/api/        FastAPI — REST, OAuth callbacks, SSE. Stateless.
+apps/worker/     same image, different entrypoint. HTTP-driven, not a poll loop.
+apps/web/        Vite + React 19 + TypeScript. Talks HTTP only.
+```
 
-### The adapter layer
-
-A source is one class behind one interface. Nothing outside it knows the source
-exists.
+**Adapters.** One class, one interface, one registry line to add a source:
 
 ```python
 class SearchAdapter(Protocol):
@@ -46,108 +42,63 @@ class SearchAdapter(Protocol):
     async def search(self, query: str, ctx: AdapterContext) -> list[Result]: ...
 ```
 
-`AdapterContext` carries the connection id, a **lazy** token getter, a deadline,
-a correlation id and a mode hint — and deliberately **no database session**, so
-an adapter cannot reach past its own job.
+One query becomes **one durable job per connection**, so two Gmail accounts run
+independently and fail independently. Every adapter returns the same closed
+`Result` (`source, id, title, snippet, url`, plus optional `author` and
+`timestamp`). The merge layer may not name a source — a test greps it for the
+literals `gmail`, `slack` and `web` and fails on any hit.
 
-One query becomes **one durable job per connection**, not per source: a user with
-two Gmail grants gets two independent runs that succeed, fail or need
-reconnecting separately. Each writes its own results and its own terminal status
-in its own transaction, so partial results are readable the entire time a slow
-source is still working.
-
-Every adapter returns the same closed `Result` — `source, id, title, snippet,
-url` required, `author` and `timestamp` optional, **nothing else**. Ranking
-inputs ride the response envelope rather than the result, so a consumer can
-render the list without knowing where a row came from.
-
-🔴 **The merge layer may not name a source, and that is a test rather than a
-convention.** `tests/test_adapters.py` greps `orchestrator.py` and `merge.py`
-for the literals `gmail`, `slack` and `web` — comments included — and fails on
-any hit. Adding a fourth source is one adapter file plus one registry line.
-
-### The send gate
-
-There is **no route that takes a recipient and a body and delivers**. The
-absence is the feature.
+**The send gate.** There is no route that takes a recipient and a body and
+delivers:
 
 ```
-POST /drafts            → a draft. Inert: no provider call, no job, nothing observable
-                          from outside. Returns {draft, confirmation}
-POST /drafts/{id}/send  → the gate. Requires confirmed_sha256 over channel ‖
-                          recipient ‖ subject ‖ body. Idempotent on a key the
-                          draft carries
+POST /drafts            → a draft. Inert: no provider call, nothing observable
+POST /drafts/{id}/send  → requires confirmed_sha256 over
+                          channel ‖ recipient ‖ subject ‖ body
 ```
 
-Editing a draft changes the digest by construction, so a confirmation rendered
-before the edit is refused — expressed as arithmetic, not as bookkeeping that
-could get out of step.
+Editing a draft changes the digest, so a stale confirmation is refused. Delivery
+is draft-then-send, so a crash mid-send is resolved by asking the provider
+whether the draft still exists rather than by guessing. When that cannot be
+determined the send becomes **`uncertain`** — never `failed` — and is offered two
+explicit resolutions instead of a retry.
 
-Delivery is **draft-then-send**, not `messages.send`: Gmail's draft id is a
-server-side idempotency token whose *existence* is the state machine. Crash
-between dispatch and record and we ask the provider whether the draft still
-exists instead of guessing. When the answer cannot be obtained the send becomes
-**`uncertain`** — never `failed` — and is offered two explicit resolutions
-rather than a retry, because re-sending a message that may already have arrived
-is the misfire this whole thing exists to prevent.
+`packages/core` imports nothing from `apps/` and no web framework, enforced by
+import-linter. The console is a pure consumer: every route works with an API key
+and there is no browser-session path.
 
-### The module boundary
+→ **[docs/DESIGN.md](docs/DESIGN.md)** for why each of these is shaped this way,
+the failure model, the OAuth design, and the tradeoffs.
 
-```
-packages/core/     the reusable module: adapters, sending, jobs, connections
-apps/api/          FastAPI — REST surface, OAuth callbacks, SSE. Stateless.
-apps/worker/       same image, different entrypoint. HTTP-driven, not a poll loop.
-apps/web/          Vite + React 19 + TypeScript SPA. Talks HTTP only.
-```
+## Quickstart
 
-`packages/core` imports nothing from `apps/` and no web framework — the
-dependency arrow only ever points inward. Enforced, not asserted:
-
-```bash
-uv run lint-imports
-```
-
-The console is a **pure consumer**: every route is reachable with an API key and
-there is no browser-session path, so "the UI has no privileged access" is
-structurally true rather than an assertion to audit. That has a test on both
-sides — `tests/test_route_surface.py` enumerates the API surface, and
-`tests/test_web_boundary.py` greps `apps/web/src` for locally-derived decisions
-(`canSend`, `isRetryable`, ranking inputs, `new EventSource(`, client-side
-digests) and for the API fields the console must still be *reading*.
-
-## Local development
-
-Requires Docker (or Colima) and nothing else.
+Requires Docker (or Colima).
 
 ```bash
 cp .env.example .env
 
-# 🔴 Generate a token-encryption key. This is a real step, not boilerplate:
-# every route that touches a credential — including the OAuth authorize call —
-# signs or encrypts with it, and there is deliberately no plaintext fallback
-# and no generate-if-missing path (`risks.md` R9). A key that appeared by magic
-# would mean a later restart silently could not decrypt what an earlier one
-# wrote. Without it the first thing you click answers `internal_config_error`,
-# which is *our* fault and says so.
+# Generate the token-encryption key. Required: there is no plaintext fallback
+# and no generate-if-missing path, so the app fails closed without it.
 python3 -c 'import os,base64;print("TOKEN_KEYRING="+base64.b64encode(os.urandom(32)).decode())' >> .env
 
 docker compose up --build
-make seed                        # the demo dataset — see below
+make seed
 ```
 
-In a Codespace the key is generated for you at container create — the container
-is disposable and so is the key.
+| | |
+|---|---|
+| SPA | http://localhost:5173 |
+| API | http://localhost:8080/health |
+| Worker | http://localhost:8081/health |
+| Postgres | `localhost:5433` (not 5432, so a native install is left alone) |
 
-- API — http://localhost:8080/health
-- Worker — http://localhost:8081/health
-- SPA — http://localhost:5173
-- Postgres — `localhost:5433` (5433, not 5432, so a natively-installed
-  Postgres on the default port is left alone)
+Migrations run as a one-shot `migrate` service before `api` and `worker` start.
+With no provider credentials configured, every source reports itself
+unconfigured and the web adapter serves fixtures badged `mock` — visible on
+every source chip rather than silent.
 
-Migrations run as their own one-shot `migrate` service before `api` and
-`worker` start, so two replicas cannot race on the same migration.
-
-### Without Docker
+<details>
+<summary><b>Without Docker</b></summary>
 
 ```bash
 uv sync
@@ -157,198 +108,91 @@ uv run uvicorn api.main:app --reload --port 8080
 cd apps/web && npm install && npm run dev
 ```
 
-⚠️ **Two processes cannot both own port 8080.** If you run uvicorn on the host,
-keep Docker's `api` stopped — otherwise whichever wins the bind decides what you
-are testing, silently, and the symptom is a stale build you then debug for an
-hour. `lsof -nP -iTCP:8080 -sTCP:LISTEN` says who has it, and `pkill -f "uvicorn
-apps.api.main"` is the reliable way to stop the host one (a plain `kill` on the
-pid `lsof` reports has been observed to leave it running).
+Two processes cannot both own port 8080 — if you run uvicorn on the host, keep
+Docker's `api` stopped, or whichever wins the bind silently decides what you are
+testing. `pkill -f "uvicorn apps.api.main"` stops the host one reliably.
+</details>
 
-The compose stack reads `.env` for the credential surface, so `docker compose
-up` and the host process behave the same way. Unset values mean every provider
-reports itself unconfigured and the adapters serve fixtures badged `mock` — the
-safe default, and visible on every source chip rather than silent.
-
-### GitHub Codespaces
+<details>
+<summary><b>GitHub Codespaces</b></summary>
 
 `.devcontainer/devcontainer.json` provisions Python 3.13, Node 22 and
-**docker-in-docker** — the last is not optional: the test suite starts its own
-Postgres with testcontainers and needs a daemon it controls.
+**docker-in-docker** — required, because the test suite starts its own Postgres
+with testcontainers.
 
 ```bash
-# in the Codespace terminal
 cp .env.example .env
 docker compose up -d --wait db migrate
 docker compose up -d api worker web
 make seed
 ```
 
-Ports 8080 (api), 8081 (worker), 5173 (SPA) and 5433 (Postgres) forward
-automatically. The SPA derives its API host from the page it was served from
-(`apps/web/src/api/client.ts`), so the forwarded SPA URL reaches the forwarded
-API with no rebuild — set `VITE_API_BASE_URL` only if you move the API somewhere
-else.
+Ports 8080, 8081, 5173 and 5433 forward automatically. The SPA derives its API
+host from the page it was served from, so the forwarded URLs work with no
+rebuild.
 
-🔴 **Codespaces puts the forwarded port in the hostname, not after a colon** —
-`https://<name>-5173.app.github.dev`. Two things follow, and both were wrong
-until they were looked at directly:
-
-- the SPA rewrites the port *label* to find the API rather than appending
-  `:8080`, which would resolve to nothing (`deriveApiBaseUrl`, and it has a test
-  precisely because the case is unreachable from a laptop);
-- `CORS_ORIGINS` has to include the forwarded SPA origin, so the devcontainer
-  builds it from `CODESPACE_NAME`. With only the localhost pair, the API rejects
-  every request the console makes.
-
-⚠️ **OAuth in a Codespace needs one extra step.** Google and Slack match
-redirect URIs byte-exactly, so a forwarded Codespace hostname has to be
-registered in both consoles before a connect will complete — and the hostname
-changes per Codespace. Everything except connecting a live provider works
-without it: seed data, web search, the full send gate against the fixture
-provider, and the whole test suite.
+OAuth needs one extra step: Codespaces puts the port in the *hostname*
+(`https://<name>-5173.app.github.dev`) and it changes per Codespace, so a live
+provider connect requires registering that hostname in both consoles.
+Everything else — seed data, web search, the full send gate, the whole test
+suite — works without it.
+</details>
 
 ## OAuth setup
 
-Neither provider is required to explore the app — see
-[Seed data](#seed-data). This is for connecting real accounts.
+Neither provider is needed to explore the app. This is for connecting real
+accounts.
 
-Both providers need a **public HTTPS redirect URI**. Slack rejects
-`http://localhost` outright, so a tunnel is a prerequisite rather than an
-optimisation:
+Both require a **public HTTPS redirect URI** — Slack rejects `http://localhost`
+outright, so a tunnel is a prerequisite:
 
 ```bash
 cloudflared tunnel --url http://localhost:8080
-# → https://<random>.trycloudflare.com ; put it in .env as OAUTH_TUNNEL_URL
+# → put the https URL in .env as OAUTH_TUNNEL_URL
 ```
 
-⚠️ **The quick-tunnel hostname is random per restart** and both consoles match
-exactly. If OAuth suddenly fails with `redirect_uri_mismatch`, that is why:
-update `OAUTH_TUNNEL_URL` **and** the redirect URI in both consoles.
+The quick-tunnel hostname is random per restart and both consoles match it
+exactly, so `redirect_uri_mismatch` after a restart means updating
+`OAUTH_TUNNEL_URL` **and** both consoles.
 
-### Google
+**Google.** Cloud console → OAuth consent screen (External) → enable the Gmail
+API → Credentials → OAuth client ID (Web application). Redirect URI exactly
+`https://<tunnel>/v1/connections/callback/gmail`. Request four scopes and no
+more:
 
-1. Google Cloud console → **APIs & Services → OAuth consent screen**. External.
-2. Enable the **Gmail API**.
-3. **Credentials → Create OAuth client ID → Web application.** Authorized
-   redirect URI, exactly:
-   `https://<tunnel>/v1/connections/callback/gmail`
-4. Scopes — request exactly these four and no more:
+| Scope | Why |
+|---|---|
+| `openid`, `email` | Match a re-grant to the connection it repairs |
+| `gmail.readonly` | `gmail.metadata` cannot use `q`, so it cannot search |
+| `gmail.compose` | Draft-then-send. Never `gmail.send` — see [DESIGN](docs/DESIGN.md#the-send-gate) |
 
-   | Scope | Why |
-   |---|---|
-   | `openid`, `email` | Identify the account so a re-grant can be matched to the row it repairs |
-   | `gmail.readonly` | Restricted, and unavoidable: `gmail.metadata` cannot use the `q` parameter, so it cannot search |
-   | `gmail.compose` | Draft-then-send. **Never `gmail.send`** — a draft gives the *user* an independent record, so an in-doubt send is something they resolve in their own mailbox instead of trusting our status page |
+Publish the app to **In production** (it stays unverified) to remove the 7-day
+refresh-token expiry. Unverified apps show an interstitial — **Advanced → Go to
+… (unsafe)**:
 
-   Not requested: `gmail.modify`, `gmail.insert`, or the blanket
-   `https://mail.google.com/`.
-5. **Publish the app to "In production"** (it stays unverified). This is what
-   removes the 7-day refresh-token expiry that testing-mode grants carry. An
-   unverified app shows an interstitial — click **Advanced → Go to … (unsafe)**.
-6. `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` into `.env`.
+<img src="docs/images/oauth-unverified-advanced.jpg" alt="the unverified-app interstitial with Advanced expanded" width="520">
 
-### Slack
+Then put `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` in `.env`.
 
-The repo ships [`docs/slack-app-manifest.yaml`](docs/slack-app-manifest.yaml) so
-you can stand up your own internal app in about thirty seconds rather than us
-distributing one. Slack → **Your Apps → Create New App → From an app manifest**,
-paste it, then replace the placeholder redirect URI with
-`https://<tunnel>/v1/connections/callback/slack` in the manifest **and** in
-OAuth & Permissions.
-
-🔴 **`search:read` belongs in `user_scope`, not `scope`.** A bot token sent to
-`search.messages` is rejected with `not_allowed_token_type`, which names nothing
-and reads like our bug. Search runs on the **user** token so it sees the channels
-the user sees; posting runs on the **bot** token so a message from this app is
-attributable to the app rather than to a person. That two-token split is
-deliberate and verified by a spike.
-
-Bot scopes: `chat:write`, `chat:write.public` (post without joining, which kills
-most `not_in_channel`), `channels:read`, `channels:history`, `channels:join`,
-`metadata.message:read`. User scope: `search:read`.
-
-⚠️ **Slack grants are additive and cannot be narrowed.** Re-authorizing with a
-scope removed from both the request *and* the manifest still returns a token
-carrying it; only uninstalling clears it. That is why the scope pre-flight
-(`core/connections/scopes.py`) is a subset test and **reports rather than
-blocks** — a literal `required ⊆ granted` equality check condemns a healthy
-Google grant, because we ask for `email` and Google returns
-`https://www.googleapis.com/auth/userinfo.email`.
-
-⚠️ Prefer a **developer sandbox** over a free workspace: no 90-day window, no
-10-app cap, and no bulk-send throttle while seeding demo messages.
-
-#### The Slack ToS boundary
-
-Slack's API terms restrict storing message content, and the design takes that
-seriously rather than working around it:
-
-- **Message bodies are cached with a TTL, not archived.** `search_results` gives
-  provider-sourced body text an expiry column; identifiers, permalinks and
-  timestamps persist so history stays navigable after the content ages out.
-  A search result you can still click is not the same as a copy of the message.
-- **Only identifiers are persisted long-term** — channel id, message `ts`,
-  permalink. Everything a user needs to go and look at the original, nothing
-  that stands in for it.
-- **The app stays undistributed.** No public distribution, no directory listing,
-  no shared installation. Each reviewer installs the manifest into their own
-  workspace under their own tokens, which is also why the credentials never
-  leave the machine they were granted on.
-
-The same reasoning is why the reconciliation probe reads
-`conversations.history` for one message id rather than pulling a channel: the
-narrowest read that answers "did this specific message post".
-
-### Test accounts, and what is deliberately not published here
-
-**Nothing here needs an account.** Sign in with any address, search, and browse
-seeded history in every state — the web adapter needs no grant and the seed
-dataset covers every terminal and non-terminal status. Connecting a provider
-adds live data; it is not the price of entry. The sign-in screen puts all three
-first-run states one click apart; see [Try it](#try-it).
-
-⚠️ **The deployed instance carries no personal data.** The Gmail account
-connected there is the throwaway; the author's own grant was disconnected
-before publishing, which deletes the stored credentials. Because sign-in is an
-address with no password, anyone can sign in as any address — so a real
-personal grant must never be left connected on a public instance, and this one
-is not.
-
-Seeded sends go to `TEST_RECIPIENT` (default `qa@example.test`). `.test` is
-reserved by RFC 6761 and can never resolve, so a seeded row that somehow reached
-a provider still could not deliver.
-
-Development uses a **throwaway Gmail**, not a personal account.
-
-🔴 **Its password is deliberately not in this file, and that is not an
-oversight.** A shared Google login published in a public repository gets locked
-within days — Google flags sign-ins from many IPs as account compromise, and the
-reviewer who arrives after that has *worse* than no credentials. It would also
-be a live credential in a public repo, which is the exact thing the pre-commit
-hook and push protection exist to stop; making an exception by hand is how that
-habit starts.
-
-The path that actually works, and that the brief's requirement is really about —
-never asking a reviewer to connect something personal — is the one above:
-connect **your own** throwaway. The Google OAuth app is published to production
-(unverified), so any account can complete the flow through the
-**Advanced → Go to … (unsafe)** interstitial, and Slack ships as a manifest you
-install into your own workspace. Both take about a minute and neither shares a
-credential with anyone.
+**Slack.** The repo ships [`docs/slack-app-manifest.yaml`](docs/slack-app-manifest.yaml)
+— Your Apps → Create New App → From an app manifest, then replace the
+placeholder redirect URI. Bot scopes `chat:write`, `chat:write.public`,
+`channels:read`, `channels:history`, `channels:join`,
+`metadata.message:read`; **user** scope `search:read`. The two-token split is
+deliberate and explained in [DESIGN](docs/DESIGN.md#slack-two-tokens-on-purpose).
 
 ## Web search
 
-`WEB_SEARCH_API_KEY` unset — the default — makes the web adapter serve a
-deterministic fixture set and report `mode: "mock"`, which the API puts on every
-source status and the console renders as a badge. **A mocked source is never
-allowed to look live**; that is the same honesty rule the rest of the status
-chip enforces, aimed at ourselves.
+The brief permits "a real search API **or a clearly-labeled mock**". Both are
+built: with `WEB_SEARCH_API_KEY` set the adapter calls the Brave Search API, and
+unset — the default — it serves a deterministic fixture set and reports
+`mode: "mock"`, which the API puts on every source status and the console
+renders as a badge.
 
-The brief explicitly permits a clearly-labelled mock, and taking it buys two
-things worth more than live web results: the test suite and Codespaces stay
-hermetic with no third-party key, and the demo is deterministic. Set the key and
-the same adapter goes live with no other change — the mock is a fallback inside
-one adapter, not a different code path.
+A mocked source is never allowed to look live. Taking the mock by default keeps
+the test suite and Codespaces hermetic with no third-party key, and keeps the
+demo deterministic. Setting the key goes live with no other change — the mock is
+a fallback inside one adapter, not a separate code path.
 
 ## Seed data
 
@@ -356,353 +200,183 @@ one adapter, not a different code path.
 make seed
 ```
 
-Writes five searches and seven sends covering **every status the runtime can
-produce** — delivered, transiently retrying mid-backoff, permanently failed with
-a real provider payload, a revoked grant with a working reconnect link, and an
-`uncertain` send with the evidence needed to settle it. The point is that the app
-is fully explorable **with zero connections**: a reviewer who has connected
-nothing can still browse history and see every state.
+Five searches and seven sends covering **every status the runtime can produce**:
+delivered, transiently retrying mid-backoff, permanently failed with a real
+provider payload, a revoked grant with a working reconnect link, and an
+`uncertain` send with the evidence needed to settle it. So the app is fully
+explorable with zero connections.
 
 Re-running replaces the seed rather than duplicating it. Seed rows carry
-`is_seed`, every listing reports it, and `?include_seed=false` excludes them —
-so seeded data can never be mistaken for something you did.
-
-🔴 **Seed rows never touch a provider.** They are rows. With live credentials
-configured, a seeder that dispatched would send real email.
-
-Seeded sends are addressed to the **designated test recipient**, `TEST_RECIPIENT`
-(default `qa@example.test`). No reviewer is ever asked to supply a personal
-address, and `.test` is reserved by RFC 6761 so it can never resolve.
+`is_seed`, every listing reports it, and `?include_seed=false` excludes them, so
+seeded data can never be mistaken for something you did. Seed rows never touch a
+provider — they are rows. Seeded sends address `TEST_RECIPIENT` (default
+`qa@example.test`); `.test` is reserved by RFC 6761 and can never resolve.
 
 ## The API
 
-Base `http://localhost:8080/v1` · Auth `X-API-Key: sk_live_…` on **every** route
-except the two noted below.
-
-There is **no browser-session path and no cookie**, so there is no endpoint the
-console can reach that `curl` cannot. That is checked rather than promised:
-`tests/test_route_surface.py` enumerates the router and fails on any route that
-is neither API-key-guarded nor named in an allowlist with a written reason.
+Base `/v1` · `X-API-Key: sk_live_…` on every route except the two marked.
+There is no cookie and no browser-session path, so there is nothing the console
+can reach that `curl` cannot.
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/auth/dev-login` | Issue an API key (PoC sign-in) — **unauthenticated**, it is how you get a key |
-| `GET` | `/api-keys` | List own keys, by prefix only |
-| `POST` | `/api-keys` | Create — **plaintext returned once**, never recoverable |
-| `DELETE` | `/api-keys/{key_id}` | Revoke |
-| `GET` | `/connections` | List with status, plus which providers are connectable |
-| `GET` | `/connections/{provider}/authorize` | Begin OAuth → `{authorize_url}`. `?reconnect={id}` re-grants in place |
-| `GET` | `/connections/callback/{provider}` | OAuth callback — **unauthenticated**, a provider redirects a browser here; everything it trusts is in the signed `state` |
+| `POST` | `/auth/dev-login` | Issue an API key (PoC sign-in) — **unauthenticated** |
+| `GET` `POST` `DELETE` | `/api-keys[/{id}]` | List by prefix, create (plaintext returned once), revoke |
+| `GET` | `/connections` | Status per connection, plus what is connectable |
+| `GET` | `/connections/{provider}/authorize` | Begin OAuth. `?reconnect={id}` re-grants in place |
+| `GET` | `/connections/callback/{provider}` | OAuth callback — **unauthenticated**; everything trusted is in the signed `state` |
 | `DELETE` | `/connections/{id}` | Disconnect. Tokens deleted, history retained |
-| `POST` | `/searches` | Fan out — returns immediately, before any adapter runs |
-| `GET` | `/searches` | History list |
-| `GET` | `/searches/{id}` | Snapshot: merged results + per-source status. `?debug=1` adds ranking inputs |
+| `POST` | `/searches` | Fan out — returns before any adapter runs |
+| `GET` | `/searches[/{id}]` | History list, or merged results + per-source status. `?debug=1` adds ranking inputs |
 | `GET` | `/searches/{id}/results` | Results only, partial-safe |
-| `GET` | `/searches/{id}/events` | SSE progress — an optional accelerator, carries nothing the snapshot lacks |
-| `POST` | `/searches/{id}/rerun` | Same query, **new** search |
-| `POST` | `/drafts` | Create a draft. **No external effect of any kind** |
-| `GET` | `/drafts/{id}` | Draft + confirmation payload |
-| `PATCH` | `/drafts/{id}` | Edit. Changes `confirm_sha256`, invalidating any digest already held |
+| `GET` | `/searches/{id}/events` | SSE progress — an accelerator; carries nothing the snapshot lacks |
+| `POST` | `/searches/{id}/rerun` | Same query, new search |
+| `POST` `GET` `PATCH` | `/drafts[/{id}]` | Create (no external effect), read, edit (invalidates the digest) |
 | `POST` | `/drafts/{id}/send` | **The gate.** Idempotent |
-| `GET` | `/sends` | History list |
-| `GET` | `/sends/{id}` | Detail: attempts, full error text, evidence |
+| `GET` | `/sends[/{id}]` | History, or detail: attempts, full error text, evidence |
 | `POST` | `/sends/{id}/retry` | Operator retry, under the original key |
 | `POST` | `/sends/{id}/resolve` | Settle an in-doubt send |
 
-Machine-readable schema at `/openapi.json`. The console's TypeScript types are
-**generated** from it with `make schema` and never hand-edited — a test
-regenerates and compares.
+Schema at `/openapi.json`; the console's TypeScript types are generated from it
+with `make schema` and never hand-edited.
 
-**Listings** take `?limit` (≤100, default 25), `?cursor`, and
-`?include_seed=false`, newest first. Paging is keyset rather than OFFSET, so a
-row landing while you page cannot make you see another one twice.
+Listings take `?limit` (≤100), `?cursor` and `?include_seed=false`, newest
+first, keyset-paged. Every query filters by the key's owner, and another user's
+resource returns **404, never 403** — a 403 would confirm it exists.
 
-**Scoping**: every query filters by the key's owner, and another user's resource
-returns **404, never 403** — a 403 would confirm it exists.
-
-### Errors
-
-Every refusal carries a machine-readable `code` and a `classification`, so a
-client can decide whether retrying is meaningful without parsing prose:
+Every refusal carries a machine-readable `code` and a `classification`
+(`transient` · `permanent` · `needs_reconnect` · `config`) so a client can decide
+whether retrying is meaningful without parsing prose:
 
 ```jsonc
 { "error": { "code": "connection_needs_reconnect", "classification": "needs_reconnect",
              "message": "Google access was revoked.",
-             "reconnect_url": "/v1/connections/gmail/authorize?reconnect=31" } }
+             "action_url": "/v1/connections/gmail/authorize?reconnect=31" } }
 ```
 
-| Code | HTTP | Class | What to do |
-|---|---|---|---|
-| `unauthorized` | 401 | permanent | Identical for wrong, revoked, expired and unknown keys — never disclose which |
-| `not_found` | 404 | permanent | Also returned for another user's resource |
-| `confirmation_required` | 422 | permanent | Create a draft and send its `confirm_sha256` |
-| `body_changed_since_confirmation` | 422 | permanent | Re-read the draft and confirm what it holds now |
-| `idempotency_key_body_mismatch` | 422 | permanent | Caller bug: this key was used for different content |
-| `resolution_required` | 409 | permanent | An in-doubt send needs a decision — `POST /sends/{id}/resolve` |
-| `connection_needs_reconnect` | 409 | needs_reconnect | A grant existed and was revoked — send the user to `action_url` |
-| `connection_not_connected` | 409 | needs_reconnect | This provider was never connected — send the user to `action_url`. Distinct verb: offering to *re*connect an account nobody ever linked reads as though we lost something |
-| `recipient_invalid` | 422 | permanent | Do not retry |
-| `channel_not_found` | 422 | permanent | Do not retry |
-| `provider_rate_limited` | 503 | transient | Auto-retried; `Retry-After` is honoured over our own backoff |
-| `provider_unavailable` | 503 | transient | Auto-retried with backoff |
-| `internal_config_error` | 500 | config | **Our** bug — alert the operator |
-| `invalid_cursor` | 422 | permanent | Drop the cursor, re-read the first page |
-| `provider_not_configured` | 503 | config | **Our** bug: no OAuth client for that provider |
-| `authorization_denied` | 400 | permanent | The user declined at the consent screen |
-| `authorization_incomplete` | 400 | permanent | The callback carried no code — restart the flow |
-| `state_invalid` | 400 | permanent | Signed state missing, tampered with, or expired |
-| `reconnect_account_mismatch` | 409 | permanent | The re-grant authorized a different account |
-
-The `config` class exists so a rotated client secret never renders as "reconnect
-your account", which sends a user round in circles repairing a grant that was
-never broken.
-
 Codes are declared once in `apps/api/catalog.py`, and `tests/test_error_catalog.py`
-makes a **real request for every one of them** and reads the response — because a
-documented error code is not an error code that has ever been returned.
+makes a real request for every one and reads the response — a documented error
+code that has never been returned is not an error code.
 
-## Driving it with curl
+### Driving it with curl
 
-The whole product loop, no UI process running. `make smoke` runs this
-continuously; here it is by hand.
+The whole loop, no UI process. `make smoke` runs this continuously.
 
 ```bash
 API=http://localhost:8080
-
-# 1. A key. The plaintext exists once, here, and is never recoverable.
-KEY=$(curl -sX POST $API/v1/auth/dev-login \
-        -H 'content-type: application/json' \
+KEY=$(curl -sX POST $API/v1/auth/dev-login -H 'content-type: application/json' \
         -d '{"email":"you@example.test"}' | jq -r .key)
 AUTH="X-API-Key: $KEY"
 
-# 2. Fan out. Returns immediately — no adapter has run yet.
-SEARCH=$(curl -sX POST $API/v1/searches -H "$AUTH" \
-          -H 'content-type: application/json' \
+# Fan out. Returns immediately — no adapter has run yet.
+SEARCH=$(curl -sX POST $API/v1/searches -H "$AUTH" -H 'content-type: application/json' \
           -d '{"query":"acme renewal"}' | jq -r .search_id)
 
-# 3. Poll the snapshot. `finished` is false while ANY source is non-terminal.
-#    Partial results are readable the whole time.
+# Partial results are readable while slow sources are still working.
 curl -s "$API/v1/searches/$SEARCH" -H "$AUTH" | jq '{finished, sources}'
-curl -s "$API/v1/searches/$SEARCH/results" -H "$AUTH" | jq '.results[0]'
 
-# 4. A draft. NO provider is contacted — a draft is inert.
-DRAFT=$(curl -sX POST $API/v1/drafts -H "$AUTH" \
-         -H 'content-type: application/json' \
+# A draft. No provider is contacted.
+DRAFT=$(curl -sX POST $API/v1/drafts -H "$AUTH" -H 'content-type: application/json' \
          -d '{"channel":"gmail","to":"qa@example.test","body":"Confirming for Thursday."}')
-ID=$(echo "$DRAFT"     | jq -r .draft.id)
-SHA=$(echo "$DRAFT"    | jq -r .confirmation.confirm_sha256)
+ID=$(jq -r .draft.id <<<"$DRAFT"); SHA=$(jq -r .confirmation.confirm_sha256 <<<"$DRAFT")
 
-# 5. No digest, no send. The refusal IS the product.
+# No digest, no send. The refusal is the product.
 curl -sX POST $API/v1/drafts/$ID/send -H "$AUTH" \
-     -H 'content-type: application/json' -d '{}' | jq .error.code
-#   → "confirmation_required"
+     -H 'content-type: application/json' -d '{}' | jq -r .error.code
+#   → confirmation_required
 
-# 6. The send. 201, and the worker delivers it in the background.
+# The send, then the exact same call again: one message, same provider_message_id.
 curl -sX POST $API/v1/drafts/$ID/send -H "$AUTH" \
      -H 'content-type: application/json' -d "{\"confirmed_sha256\":\"$SHA\"}" | jq
-
-# 7. THE SAME CALL AGAIN. 200, the same send, the same provider_message_id.
-#    One message. This is the guarantee the whole design is arranged around.
 curl -isX POST $API/v1/drafts/$ID/send -H "$AUTH" \
      -H 'content-type: application/json' -d "{\"confirmed_sha256\":\"$SHA\"}" \
   | grep -i 'idempotent-replayed'
 #   → Idempotent-Replayed: true
-
-# 8. History, and the full untruncated error on anything that failed.
-curl -s "$API/v1/sends?include_seed=false" -H "$AUTH" | jq '.sends[] | {state, attempts}'
-curl -s "$API/v1/sends/<id>" -H "$AUTH" | jq '{state, error, retryable_by_operator}'
-curl -sX POST "$API/v1/sends/<id>/retry" -H "$AUTH" | jq .state
 ```
-
-Progress can also be streamed. Use `fetch` + `ReadableStream`, never
-`EventSource` — it cannot set headers, and a key in a query string is written to
-the request log:
-
-```bash
-curl -N "$API/v1/searches/$SEARCH/events" -H "$AUTH"
-```
-
-## Secret scanning
-
-Enable the pre-commit hook once per clone:
-
-```bash
-git config core.hooksPath .githooks
-brew install gitleaks
-```
-
-The hook **fails closed** — if gitleaks is missing it blocks the commit rather
-than silently leaving changes unscanned. This repo handles OAuth refresh
-tokens and a token-encryption key; a secret reaching git history is fixable
-only by rotating the credential, never by a follow-up commit.
 
 ## Checks
 
 ```bash
-make test        # the full suite against a throwaway Postgres 17
-make headline    # just the behaviours this is graded on (11 tests, ~17s)
+make test        # full suite against a throwaway Postgres 17
+make headline    # just the graded behaviours (11 tests, ~17s)
 make lint        # ruff + import-linter module boundaries
 make typecheck   # mypy --strict
-make web         # the console: tsc, oxlint, and its unit tests
-make smoke       # the loop above, end to end, with no UI running
-make schema      # regenerate the console's types from OpenAPI
-make image       # cross-build linux/amd64 and prove both entrypoints SERVE
+make web         # the console: tsc, oxlint, unit tests
+make smoke       # the loop above, end to end, no UI running
+make image       # cross-build linux/amd64 and prove both entrypoints serve
 ```
 
 CI runs all of these on every push (`.github/workflows/ci.yml`).
 
-### The headline suite
-
-`make headline` runs the six behaviours worth looking at first — marked with
-`@pytest.mark.headline` rather than moved into one file, so each stays beside
-the machinery it exercises where whoever changes that machinery will read it.
+`make headline` covers the behaviours worth looking at first — marked in place
+rather than moved into one file, so each stays beside the machinery it tests:
 
 | What it proves | Where |
 |---|---|
-| **Exactly-once send** under a duplicate key — concurrently with real OS threads released by a barrier, and separately across a crash injected at **every seam** between dispatch and record | `test_send_gate.py`, `test_send_crash.py` |
-| **A slow adapter does not block fast ones** — over a **real socket**, because `TestClient` and `ASGITransport` both buffer the whole response and so *cannot detect blocking at all* | `test_partial_results.py` |
+| **Exactly-once send** under a duplicate key — concurrently with real OS threads released by a barrier, and across a crash injected at every seam between dispatch and record | `test_send_gate.py`, `test_send_crash.py` |
+| **A slow adapter does not block fast ones** — over a real socket, because `TestClient` and `ASGITransport` both buffer the whole response and so cannot detect blocking at all | `test_partial_results.py` |
 | **Every result conforms to the closed shape**, asserted at the wire | `test_adapters.py` |
-| **A revoked grant surfaces as reconnect** and survives one — the same connection id, and the search that failed then succeeds | `test_connections.py` |
-| **Transient retries with backoff, permanent does not retry** — the 503 reschedules and keeps its attempt count; the invalid recipient is surfaced immediately | `test_job_runtime.py` |
-| **History fidelity** — attempt count, untruncated error text, and an operator retry that *resumes* the record rather than starting a new one | `test_api_e2e.py` |
+| **A revoked grant surfaces as reconnect** and survives one — same connection id, and the search that failed then succeeds | `test_connections.py` |
+| **Transient retries with backoff, permanent does not** | `test_job_runtime.py` |
+| **History fidelity** — attempts, untruncated error, and an operator retry that resumes the record | `test_api_e2e.py` |
 
-### Hermetic on purpose
+The suite is hermetic: no third-party key, no network.
+`tests/test_hermetic.py` asserts that rather than claiming it — including that
+**no default source is registered `live`**, because adapters register at module
+import, so a machine with a populated `.env` could otherwise reach real
+providers while CI stayed green.
 
-No third-party key, no network. `tests/test_hermetic.py` asserts it rather than
-claiming it: no credential is visible, every source reports itself
-unconfigured, and **no default source is registered `live`**.
+Enable the secret-scanning hook once per clone — it fails closed if gitleaks is
+missing, rather than leaving changes unscanned:
 
-That last one is the real check. Adapters register at *module import*, so if the
-test environment were applied any later than `conftest`'s own import, a machine
-with a populated `.env` would silently register live adapters and start reaching
-real providers — passing on CI and failing on a laptop, which is the worst shape
-a defect can have. That is not hypothetical; it happened, and this is what would
-have caught it.
-
-`make smoke` is the important one: it is the reviewer's own "run it entirely
-through the API" check, run continuously by us instead of once by them. Without
-`--api-key` it runs as a fresh user, asserts the honest refusal a user with no
-OAuth grant gets, and **skips the delivery leg loudly**. With
-`--api-key <key of a connected user>` it runs the full loop against live
-providers.
-
-## Known limitations and security posture
-
-Stated rather than discovered. The reasoning for each is in
-`openspec/changes/unified-search-safe-send/risks.md`.
-
-- **Sign-in is an email address, no password** (`/auth/dev-login`). Anyone who
-  knows a user's email can mint a key for that user and act on whatever that
-  user has connected. Accepted deliberately for a reviewable PoC — a stranger
-  signing in gets an *empty* account, which is the intended first-run path —
-  but it means a real personal grant should never be left connected on the
-  deployed instance outside a demo. The demo accounts here are throwaways;
-  production would put an identity provider in front of key issuance.
-- **The API key lives in `sessionStorage`**, which is XSS-reachable. Accepted
-  deliberately: a single credential path is what makes "the console is a pure
-  consumer" structurally true, and that is the property being graded. The
-  production alternative is an httpOnly refresh cookie plus a short-lived
-  access token.
-- **Refresh tokens are encrypted with an envelope key** bound to the connection
-  row id as AAD, so ciphertext lifted into another row will not decrypt. The key
-  is read from a mounted file, not an env var — env vars resolve at instance
-  start, so rotating one forces a redeploy, and they leak through
-  `/proc/self/environ`. Key management is a keyring string (`v1:…,v2:…`), which
-  is honest key rotation but not an HSM.
-- **`uncertain` is a real state, not a bug.** Exactly-once delivery to a
-  provider with no idempotency key is impossible — it reduces to the Two
-  Generals problem. We guarantee exactly-once *effect* and expose the residue
-  honestly rather than guessing.
-- **Ranking is deliberately simple**: within-source reciprocal rank blended with
-  recency decay, plus a per-source cap. Relevance scores from Gmail, Slack and a
-  web API are not comparable, so any unified score would be invented. The inputs
-  are inspectable under `?debug=1`.
-- **`gmail.compose` is a restricted scope** and we ask for it knowingly — see
-  [OAuth setup](#oauth-setup) for why a draft beats `gmail.send`.
-- **Slack message bodies are cached with a TTL, not archived.** Identifiers and
-  permalinks persist; content expires. The app stays undistributed.
-- **The web adapter is a labelled mock by default** — see
-  [Web search](#web-search).
+```bash
+git config core.hooksPath .githooks && brew install gitleaks
+```
 
 ## Deployment
 
-Deployed 2026-08-04 and verified live. The moving parts:
+| | |
+|---|---|
+| SPA | Firebase Hosting (Spark) |
+| API | Cloud Run `us-east4`, public |
+| Worker | Cloud Run, **private** (`--no-allow-unauthenticated`) |
+| Database | Neon `aws-us-east-1`, pooled endpoint, PG 17 |
+| Hot path | Cloud Tasks — the API nudges the worker after each job-creating commit |
+| Sweep | Cloud Scheduler `*/15` → recovers stale leases, then drains due jobs |
+| Secrets | Secret Manager; the token keyring is a **file mount**, not an env var |
 
-```
-SPA      Firebase Hosting (Spark)   https://unified-search-1785899621.web.app
-API      Cloud Run (public)         https://api-88631762875.us-east4.run.app
-Worker   Cloud Run (PRIVATE)        https://worker-88631762875.us-east4.run.app
-DB       Neon aws-us-east-1         pooled endpoint, PG 17
-Hot path Cloud Tasks queue `work`   API nudges worker after each job-creating commit
-Sweep    Cloud Scheduler `*/15`     OIDC POST to /sweep — recovers stale
-                                    leases, then DRAINS due jobs (backoff
-                                    retries have no other wake-up on Cloud Run)
-Secrets  Secret Manager             database-url, both OAuth client secrets,
-                                    token-keyring (mounted at /secrets/keyring)
-```
+`scripts/deploy/bootstrap-gcp.sh` does one-time project setup and
+`scripts/deploy/deploy.sh` builds, pushes and deploys both services. Register
+the OAuth redirect URIs against the API URL afterwards — exact match, no
+trailing slash.
 
-What was verified on the deployed URLs, not locally: `/health` does a real
-Neon round trip; a search POSTed to the API is picked up by a **Cloud Tasks
-push** to the private worker with no other request in flight; SSE streams
-through Cloud Run unbuffered (and polling never depended on it); a **full
-Gmail OAuth connect** from the hosted SPA's authorize URL through the deployed
-callback, ending in an `active` connection; a live Gmail search returning real
-messages next to the labelled web mock; **two genuine Google accounts on one
-user** — one search, two independent live Gmail runs (4 and 10 results), each
-behind its own per-account chip; and the seeded history — all seven send
-states including `uncertain` — rendered from the deployed database.
+Everything runs inside free tiers. The $0 posture in order of load-bearing: a
+**Free Trial billing account, never upgraded** (auto-closes at $300/90 days with
+no auto-conversion — the only mathematical guarantee); a **$1 enforced spend
+cap** on Cloud Run plus a gross-cost alert; `--max-instances=2` everywhere (the
+default is 100); `--min-instances=0` with request-based billing; only five APIs
+enabled and never `containerscanning` ($0.26 per push); images cross-built
+locally rather than via `gcloud run deploy --source`; the sweep hits a Cloud Run
+*service*, never a Job, which bills a one-minute minimum per execution.
 
-The $0 posture, in order of load-bearing: a **Free Trial billing account,
-never upgraded** (auto-closes at $300/90 days with no auto-conversion — the
-only mathematical guarantee); a **$1 spend-cap budget** (enforced, not
-alerts-only) scoped to Cloud Run, plus a $1 gross-cost alert budget across all
-services; `--max-instances=2` everywhere (the default is 100);
-`--min-instances=0` and request-based billing, so both services scale to zero;
-only five services enabled (`run`, `artifactregistry`, `secretmanager`,
-`cloudscheduler`, `cloudtasks`) and **never `containerscanning`** ($0.26 per
-push); images cross-built locally with `docker buildx build --platform
-linux/amd64 --push` — never `gcloud run deploy --source`, which drags in Cloud
-Build and buildpack images 2–3× larger; the sweep hits the worker *service*
-endpoint, never a Cloud Run Job (1-minute minimum billing per execution); the
-SPA is on Hosting (Spark), not Cloud Run (1 GiB egress cap) and not "App
-Hosting" (Blaze-only).
+## Known limitations
 
-The hot path is `core/jobs/nudge.py`: after a job-creating commit the API
-creates one Cloud Tasks task targeting the worker's `/work` with an OIDC
-token. Three env vars turn it on (`CLOUD_TASKS_QUEUE`, `WORKER_URL`,
-`TASKS_OIDC_SERVICE_ACCOUNT`); unset — local dev, Codespaces, the test suite —
-it is a no-op and the inline loop polls instead. A failed nudge is logged and
-swallowed: the job row is already committed and the sweep will find it, so a
-lost nudge costs latency, never correctness.
+Stated rather than discovered — reasoning in [DESIGN](docs/DESIGN.md#tradeoffs-and-what-i-would-change).
 
-Reproduction is `scripts/deploy/bootstrap-gcp.sh` (one-time project setup)
-then `scripts/deploy/deploy.sh` (build, push, both services). Register the
-OAuth redirect URIs against the API URL afterwards — exact match including
-scheme and no trailing slash: `…/v1/connections/callback/gmail` and
-`…/v1/connections/callback/slack`.
-
-Because the Google OAuth app is published but **unverified**, every first
-grant walks through the "Google hasn't verified this app" interstitial —
-Advanced → *Go to api-….run.app (unsafe)*:
-
-![unverified-app interstitial](docs/images/oauth-unverified-interstitial.jpg)
-![advanced revealed](docs/images/oauth-unverified-advanced.jpg)
-
-⚠️ Two dates worth writing down: the Free Trial billing account opened
-**2026-08-04** and auto-closes at $300 or 90 days, whichever comes first; and
-Google **deletes OAuth clients idle for six months** — if no grant has
-happened by **2027-01-31**, expect to recreate the client and re-register the
-redirect URIs.
-
-## What is not here yet
-
-- **A week of deployed idle.** The scale-to-zero configuration is verified
-  (`min-instances=0`, request-based billing); the "billing still shows $0
-  after a week of idle" check needs the week to pass.
-- **Playwright.** The console has unit tests for its most dangerous component
-  and a boundary test in Python; the confirm flow end to end is still held by
-  hand verification.
-
-Phase-by-phase reasoning, including every defect found by using the product
-rather than by testing it, lives under
-`openspec/changes/unified-search-safe-send/prompts/` and in `tasks.md`.
+- **Sign-in is an address with no password.** Anyone who knows an address can
+  act as that user, so no real personal grant may be left connected on a public
+  instance — the deployed one carries throwaway accounts only. Production would
+  put an identity provider in front of key issuance.
+- **The API key lives in `sessionStorage`**, which is XSS-reachable. Accepted so
+  there is exactly one credential path.
+- **`uncertain` is a real state.** Exactly-once delivery to a provider with no
+  idempotency key reduces to the Two Generals problem; we guarantee exactly-once
+  *effect* and expose the residue rather than guessing.
+- **Ranking is deliberately simple** — scores from Gmail, Slack and a web API are
+  not comparable, so a unified score would be invented. Inputs are inspectable
+  under `?debug=1`.
+- **Slack message bodies are cached with a TTL, not archived**; identifiers and
+  permalinks persist. The app stays undistributed.
+- **The web adapter is a labelled mock by default** (the live path exists).
+- **No Playwright yet.** The console has unit tests and a Python boundary test;
+  the end-to-end confirm flow is still held by hand verification.
