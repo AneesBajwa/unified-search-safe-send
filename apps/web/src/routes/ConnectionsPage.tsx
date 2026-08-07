@@ -37,9 +37,10 @@ export function ConnectionsPage() {
       <header className="page-head">
         <h2>Connections</h2>
         <p className="page-sub">
-          One account per provider, connected by you and revocable by you. Disconnecting
-          deletes the credentials and keeps the history — the record of what was sent
-          through an account outlives the account.
+          As many accounts per provider as you like — each is its own grant, searched
+          independently and revocable on its own. Disconnecting deletes the credentials
+          and keeps the history: the record of what was sent through an account outlives
+          the account.
         </p>
       </header>
 

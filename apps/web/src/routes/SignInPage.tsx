@@ -16,6 +16,9 @@ import { adoptKey, devLogin } from "../api/client";
  * consumer of the documented API" structurally true rather than an assertion
  * somebody has to audit.
  */
+/** Matches `SEED_EMAIL` in `scripts/seed.py` — the identity `make seed` fills. */
+const SEEDED_EMAIL = "seed@example.test";
+
 export function SignInPage({ onSignedIn }: { onSignedIn: () => void }) {
   const [email, setEmail] = useState("console@example.test");
   const [key, setKey] = useState("");
@@ -40,8 +43,10 @@ export function SignInPage({ onSignedIn }: { onSignedIn: () => void }) {
       <header className="page-head">
         <h2>Sign in</h2>
         <p className="page-sub">
-          An address that has never been used here is a brand-new account, with nothing
-          connected. That is the state a reviewer meets first, so it is one field away.
+          No password: an address is an account. Three states are worth seeing, so each
+          is one click away — <strong>this address</strong> has the live Gmail and Slack
+          connections, <strong>seeded</strong> has history in every status, and{" "}
+          <strong>brand-new</strong> has nothing connected at all.
         </p>
       </header>
 
@@ -66,6 +71,17 @@ export function SignInPage({ onSignedIn }: { onSignedIn: () => void }) {
         </label>
         <button type="submit" className="button button-primary" disabled={busy}>
           {busy ? "Signing in…" : "Sign in"}
+        </button>
+        <button
+          type="button"
+          className="button"
+          disabled={busy}
+          onClick={() => {
+            setEmail(SEEDED_EMAIL);
+            void run(() => devLogin(SEEDED_EMAIL));
+          }}
+        >
+          Sign in as the seeded demo account
         </button>
         <button
           type="button"

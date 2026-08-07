@@ -4,6 +4,23 @@ Unified multi-provider search (Gmail, Slack, web) behind a pluggable adapter
 layer, plus a safe-send gate where every outbound message is drafted,
 reviewed, explicitly confirmed, and idempotent under retry.
 
+## Try it
+
+**<https://unified-search-1785899621.web.app>** — live, no account needed.
+
+Sign-in is an address, not a password, and the screen offers the three states
+worth seeing:
+
+| Click | What you land in |
+|---|---|
+| **Sign in** (`console@example.test`) | A throwaway Gmail and a Slack workspace already connected — run a search and watch all three sources report for themselves |
+| **Sign in as the seeded demo account** | History and detail in *every* status: delivered, failed, in-flight, and the amber `uncertain` |
+| **Sign in as a brand-new user** | Nothing connected — what a first-time user actually meets, with web search still returning results |
+
+Connecting a provider adds live data; it is never the price of entry, and you
+are never asked to connect anything personal. The same loop runs with no UI at
+all — see [Driving it with curl](#driving-it-with-curl).
+
 > **Status.** The API, the console, the adapters, the send gate, OAuth
 > connections, history and the seed dataset all work end to end against **real
 > Gmail and real Slack**. The whole loop is drivable with `curl` and no UI
@@ -287,7 +304,15 @@ narrowest read that answers "did this specific message post".
 **Nothing here needs an account.** Sign in with any address, search, and browse
 seeded history in every state — the web adapter needs no grant and the seed
 dataset covers every terminal and non-terminal status. Connecting a provider
-adds live data; it is not the price of entry.
+adds live data; it is not the price of entry. The sign-in screen puts all three
+first-run states one click apart; see [Try it](#try-it).
+
+⚠️ **The deployed instance carries no personal data.** The Gmail account
+connected there is the throwaway; the author's own grant was disconnected
+before publishing, which deletes the stored credentials. Because sign-in is an
+address with no password, anyone can sign in as any address — so a real
+personal grant must never be left connected on a public instance, and this one
+is not.
 
 Seeded sends go to `TEST_RECIPIENT` (default `qa@example.test`). `.test` is
 reserved by RFC 6761 and can never resolve, so a seeded row that somehow reached
