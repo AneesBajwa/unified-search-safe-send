@@ -40,9 +40,44 @@ pytestmark = pytest.mark.usefixtures("clean_db")
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CHANNEL = "C024BE91L"
 
-#: `JOB_LEASE_SECONDS` / `SEND_LEASE_SECONDS` are 2 under test (contracts.md §3),
-#: so lease expiry is a two-second wait rather than five minutes.
-LEASE_EXPIRY_WAIT = 2.4
+#: Ceiling on `_await_lease_expiry`. `SEND_LEASE_SECONDS` is 2 under test
+#: (contracts.md §3); this is deliberately far above it because it only bounds a
+#: hang — the wait itself ends the moment the lease is actually expired.
+LEASE_EXPIRY_TIMEOUT = 15.0
+
+
+async def _await_lease_expiry(send_id: uuid.UUID) -> None:
+    """Block until the send's lease has expired **by the database's clock**.
+
+    This used to be a flat ``asyncio.sleep(2.4)``. That left a 0.4 s margin over
+    a 2 s lease and measured it with a different clock than the sweeper uses, so
+    on a loaded machine — the suite sharing a laptop with a container build —
+    the sweeper could find nothing stale and the test failed roughly one run in
+    seven. Intermittent red is worse than slow red: it teaches whoever runs the
+    suite to re-run it rather than read it.
+
+    Asking the database the same question ``select_stale`` asks removes the
+    clock skew and the margin together, and returns as soon as the lease is
+    genuinely expired rather than always paying the worst case.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + LEASE_EXPIRY_TIMEOUT
+    while True:
+        async with session_scope() as session:
+            expired = await session.scalar(
+                text(
+                    "SELECT lease_expires_at < now() FROM jobs "
+                    "WHERE kind = 'send' AND ref_id = :ref"
+                ),
+                {"ref": send_id},
+            )
+        if expired:
+            return
+        assert loop.time() < deadline, (
+            f"the lease on send {send_id} never expired; "
+            f"expired={expired!r} after {LEASE_EXPIRY_TIMEOUT}s"
+        )
+        await asyncio.sleep(0.05)
 
 
 def _provider() -> FakeSendProvider:
@@ -77,10 +112,10 @@ async def _queued_send(body: str = "Confirming for Thursday.") -> tuple[uuid.UUI
 async def _send_row(send_id: uuid.UUID) -> dict[str, Any]:
     async with session_scope() as session:
         row = (
-            await session.execute(
-                text("SELECT * FROM sends WHERE id = :id"), {"id": send_id}
-            )
-        ).mappings().one()
+            (await session.execute(text("SELECT * FROM sends WHERE id = :id"), {"id": send_id}))
+            .mappings()
+            .one()
+        )
     return dict(row)
 
 
@@ -127,7 +162,7 @@ async def test_a_crash_at_any_seam_still_delivers_exactly_once(point: CrashPoint
         )
     assert state == "running", "a crashed job must keep its claim as evidence"
 
-    await asyncio.sleep(LEASE_EXPIRY_WAIT)
+    await _await_lease_expiry(send_id)
     report = await runtime.sweep()
     assert report.reconciled == 1, "a stale send must be reconciled, never blindly retried"
 
@@ -159,7 +194,7 @@ async def test_a_crash_before_the_provider_was_reached_finds_nothing_and_dispatc
     assert row["dispatched_at"] is not None, "the crash evidence must survive the crash"
     assert _provider().delivery_count == 0
 
-    await asyncio.sleep(LEASE_EXPIRY_WAIT)
+    await _await_lease_expiry(send_id)
     await runtime.sweep()
     await _drain()
 
@@ -300,7 +335,7 @@ async def test_a_subprocess_killed_with_os_exit_reconciles_to_one_delivery(
     # The parent now sees a send that is `in_flight` with `dispatched_at` set,
     # a job whose worker will never report back, and a provider that has the
     # message. Only the ledger can prove the last of those.
-    await asyncio.sleep(LEASE_EXPIRY_WAIT)
+    await _await_lease_expiry(send_id)
     await runtime.sweep()
     await _drain()
 
