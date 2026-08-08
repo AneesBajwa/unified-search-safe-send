@@ -69,6 +69,8 @@ and there is no browser-session path.
 
 → **[docs/DESIGN.md](docs/DESIGN.md)** for why each of these is shaped this way,
 the failure model, the OAuth design, and the tradeoffs.
+→ **[docs/DEMO.md](docs/DEMO.md)** is an illustrated walk-through of the whole
+product loop — every screenshot is a real capture from the deployed app.
 
 ## Quickstart
 
@@ -254,9 +256,36 @@ whether retrying is meaningful without parsing prose:
              "action_url": "/v1/connections/gmail/authorize?reconnect=31" } }
 ```
 
-Codes are declared once in `apps/api/catalog.py`, and `tests/test_error_catalog.py`
+| Code | HTTP | Class | What to do |
+|---|---|---|---|
+| `unauthorized` | 401 | permanent | Identical for wrong, revoked, expired and unknown keys — never disclose which |
+| `not_found` | 404 | permanent | Also returned for another user's resource |
+| `confirmation_required` | 422 | permanent | Send the draft's `confirm_sha256` |
+| `body_changed_since_confirmation` | 422 | permanent | Re-read the draft and confirm what it holds now |
+| `idempotency_key_body_mismatch` | 422 | permanent | Caller bug: this key was used for different content |
+| `resolution_required` | 409 | permanent | An in-doubt send needs a decision, not a retry |
+| `connection_needs_reconnect` | 409 | needs_reconnect | A grant existed and was revoked — send the user to `action_url` |
+| `connection_not_connected` | 409 | needs_reconnect | Never connected. A distinct verb: offering to *re*connect an account nobody linked reads as though we lost something |
+| `recipient_invalid` | 422 | permanent | Do not retry |
+| `channel_not_found` | 422 | permanent | Do not retry |
+| `provider_rate_limited` | 503 | transient | Auto-retried; `Retry-After` wins over our backoff |
+| `provider_unavailable` | 503 | transient | Auto-retried with backoff |
+| `invalid_cursor` | 422 | permanent | Drop the cursor, re-read the first page |
+| `authorization_denied` | 400 | permanent | The user declined at the consent screen |
+| `authorization_incomplete` | 400 | permanent | The callback carried no code — restart the flow |
+| `state_invalid` | 400 | permanent | Signed state missing, tampered with, or expired |
+| `reconnect_account_mismatch` | 409 | permanent | The re-grant authorized a different account |
+| `internal_config_error` | 500 | config | **Our** bug — alert the operator |
+| `provider_not_configured` | 503 | config | **Our** bug: no OAuth client for that provider |
+
+The `config` class exists so a rotated client secret never renders as "reconnect
+your account", which would send a user in circles repairing a grant that was
+never broken.
+
+Codes are declared once in `apps/api/catalog.py`. `tests/test_error_catalog.py`
 makes a real request for every one and reads the response — a documented error
-code that has never been returned is not an error code.
+code that has never been returned is not an error code — and separately asserts
+that this table lists every code the API can return.
 
 ### Driving it with curl
 

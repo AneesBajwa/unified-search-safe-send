@@ -5,6 +5,7 @@ import { EmptyState, SeedBadge } from "../components/EmptyState";
 import { ResultCard } from "../components/ResultCard";
 import { SourceNotice } from "../components/SourceNotice";
 import { SourceStatusChip } from "../components/SourceStatusChip";
+import { summariseSources } from "../lib/summariseSources";
 import { useConnectFlow } from "../lib/useConnectFlow";
 
 /**
@@ -109,10 +110,7 @@ export function SearchPage() {
             </h2>
             <p className="search-progress" aria-live="polite">
               {data.finished ? (
-                <>
-                  {data.results.length} result{data.results.length === 1 ? "" : "s"} from{" "}
-                  {sources.length} source{sources.length === 1 ? "" : "s"}
-                </>
+                summariseSources(data.results.length, sources)
               ) : (
                 <>
                   {reported} of {sources.length} sources reported · showing partial results

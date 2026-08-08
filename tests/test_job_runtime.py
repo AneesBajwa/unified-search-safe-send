@@ -24,13 +24,24 @@ from sqlalchemy import text
 
 pytestmark = pytest.mark.usefixtures("clean_db")
 
+#: Generous on purpose. These bound a *hang*, not the behaviour under test —
+#: the threads reach the barrier in milliseconds when the machine is idle. They
+#: were 10 s and 20 s, which a laptop running a container build alongside the
+#: suite could exceed, turning a timeout into what looked like a lost claim.
+#: Both stay well inside pytest's own 30 s per-test timeout.
+BARRIER_TIMEOUT = 20.0
+JOIN_TIMEOUT = 25.0
+
 
 async def _enqueue_adapter_job(source: str = "web", **kwargs: object) -> tuple[int, uuid.UUID]:
     user_id = await make_user()
     run_id = await make_adapter_run(user_id, source=source)
     async with session_scope() as session:
         job_id = await queue.enqueue(
-            session, kind=JobKind.ADAPTER_RUN, ref_id=run_id, **kwargs  # type: ignore[arg-type]
+            session,
+            kind=JobKind.ADAPTER_RUN,
+            ref_id=run_id,
+            **kwargs,  # type: ignore[arg-type]
         )
         await session.commit()
     assert job_id is not None
@@ -91,9 +102,7 @@ async def test_claim_never_over_claims(_: None = None) -> None:
     assert len(claimed_five) == 5
 
     async with session_scope() as session:
-        still_ready = await session.scalar(
-            text("SELECT count(*) FROM jobs WHERE state = 'ready'")
-        )
+        still_ready = await session.scalar(text("SELECT count(*) FROM jobs WHERE state = 'ready'"))
     assert still_ready == 14
 
 
@@ -132,6 +141,7 @@ async def test_two_workers_in_real_os_threads_claim_one_job_exactly_once() -> No
 
     barrier = threading.Barrier(2)
     results: list[list[int]] = []
+    failures: list[BaseException] = []
     lock = threading.Lock()
 
     def run_worker(name: str) -> None:
@@ -141,25 +151,35 @@ async def test_two_workers_in_real_os_threads_claim_one_job_exactly_once() -> No
                     # Warm the connection first so the barrier releases into the
                     # claim itself rather than into connection setup.
                     await session.execute(text("SELECT 1"))
-                    barrier.wait(timeout=10)
-                    claimed = await queue.claim(
-                        session, worker_id=name, limit=5, lease_seconds=30
-                    )
+                    barrier.wait(timeout=BARRIER_TIMEOUT)
+                    claimed = await queue.claim(session, worker_id=name, limit=5, lease_seconds=30)
                     await session.commit()
                 with lock:
                     results.append([job.id for job in claimed])
             finally:
                 await dispose_engine()
 
-        asyncio.run(go())
+        # 🔴 A thread that dies here used to vanish: the traceback went to
+        # stderr, `results` was simply short, and the assertion below reported
+        # "expected exactly one claim" — which reads as a *concurrency* failure
+        # when the real cause was a barrier timeout on a loaded machine. The
+        # cause has to survive the thread boundary, or the next person debugs
+        # the claim query instead of their laptop.
+        try:
+            asyncio.run(go())
+        except BaseException as exc:  # noqa: BLE001 - re-raised on the main thread
+            with lock:
+                failures.append(exc)
 
-    threads = [
-        threading.Thread(target=run_worker, args=(f"thread-{i}",)) for i in range(2)
-    ]
+    threads = [threading.Thread(target=run_worker, args=(f"thread-{i}",)) for i in range(2)]
     for thread in threads:
         thread.start()
     for thread in threads:
-        thread.join(timeout=20)
+        thread.join(timeout=JOIN_TIMEOUT)
+
+    still_running = [t.name for t in threads if t.is_alive()]
+    assert not still_running, f"workers did not finish within {JOIN_TIMEOUT}s: {still_running}"
+    assert not failures, f"a worker thread raised rather than claiming: {failures!r}"
 
     claimed_ids = sorted(job_id for batch in results for job_id in batch)
     assert claimed_ids == [job_id], f"expected exactly one claim, got {results}"
@@ -222,9 +242,7 @@ async def test_a_dedupe_key_blocks_a_duplicate_live_job_but_not_a_later_one() ->
     # this search" work without inventing a second key.
     async with session_scope() as session:
         await session.execute(
-            text(
-                "UPDATE jobs SET state='succeeded', lease_expires_at=NULL WHERE id=:id"
-            ),
+            text("UPDATE jobs SET state='succeeded', lease_expires_at=NULL WHERE id=:id"),
             {"id": first},
         )
         again = await queue.enqueue(
