@@ -46,8 +46,14 @@ gcloud run services update worker --region=us-east4 \
 |---|---|
 | The app, **signed out** | Part one |
 | A terminal in the repo | The `curl` segment and the grant-invalidation |
+| **Gmail for `testuser.inbound@gmail.com`** | The independent delivery witness (§6) |
+| **Slack `#social` in Unified Search Sandbox** | Same, for the Slack send |
 | `docs/DESIGN.md` | Part two, if you want the diagrams in view |
-| The Slack sandbox (`#social`) | Optional second witness for a send |
+
+🔒 **Use a separate browser profile or a guest window** with only the throwaway
+Gmail and the sandbox Slack signed in. Your personal Gmail and your work Slack
+are almost certainly open in your normal profile, and both the account switcher
+and the tab strip are on camera. Full checklist in [§6](#then-show-the-provider-itself--the-independent-witness).
 
 **4 · Rehearse the two irreversible bits once**, then re-seed:
 resolving the `uncertain` row consumes it, and invalidating a grant needs a real
@@ -58,6 +64,64 @@ something to improvise on camera.
 live](#if-something-breaks-live). Cloud Run cold-starts, so if the very first
 request is slow, that is a scale-to-zero cold start and it is worth saying so
 out loud rather than waiting in silence.
+
+---
+
+# Opening (~2:30)
+
+Talk over the sign-in screen or a code editor — no clicking yet. The job here is
+to tell them what they are about to watch and why it is built the way it is, so
+every later screen lands as evidence rather than as a surprise.
+
+## What it is (~40 s)
+
+> *"This searches Gmail, Slack and the web from one query, and lets you reply
+> through a gate that will not let you send twice or send by accident."*
+
+> *"Two things are the actual product. A **pluggable adapter layer**, where each
+> source is an independent background worker returning one common shape — so the
+> merge layer never knows which sources exist and adding a fourth is one file. And
+> a **safe-send gate**, where nothing reaches a provider without an explicit
+> confirmation over exactly what will be sent. The unified inbox is one product
+> built on top of those two; they are the reusable part."*
+
+> *"I will show it working end to end against real Gmail and real Slack on a
+> deployed URL, then walk the architecture. The parts I would most want judged are
+> what happens when a grant breaks and what happens when a send is retried."*
+
+## The stack, and why (~1:10)
+
+Do not read this as a list — say the reasons. The choices worth defending are
+the ones where the obvious answer was rejected.
+
+| Layer | Choice | Why this one |
+|---|---|---|
+| Backend | **Python 3.13 + FastAPI** | The brief says pick one language and keep the adapters and gate in it. Async fits a fan-out that is almost entirely I/O wait, and the provider SDKs are first-class here. |
+| Data | **PostgreSQL 17** | Not just storage — **the queue is Postgres**. `FOR NO KEY UPDATE SKIP LOCKED` for claims, advisory locks for token refresh, partial indexes so index size tracks the backlog. |
+| Job runtime | **Hand-rolled, on Postgres** | Deliberately **no Redis, no Celery, no RabbitMQ.** A second datastore means the queue and the data it describes can disagree — and exactly-once sending depends on the claim and the send row committing together. One transaction, one truth. |
+| Frontend | **React 19 + TypeScript + Vite** | The brief recommends React. Types are **generated from the OpenAPI schema** by `make schema`, so the console cannot drift from the API. Three routes return a free-form dict that OpenAPI cannot describe, so those types are hand-written — and the file says which three and why, rather than leaving you to notice. |
+| Hosting | **Cloud Run + Firebase Hosting + Neon** | All scale to zero and all sit inside free tiers. |
+| Hot path | **Cloud Tasks + Cloud Scheduler** | A resident polling worker costs $44.71/month on Cloud Run. Push-driven is free *and* lower latency. |
+| Quality | **mypy --strict, ruff, import-linter, testcontainers, Vitest** | `import-linter` is the interesting one: it enforces that the core module imports nothing from the apps, so "standalone module" is checkable rather than claimed. |
+
+> *"Two omissions are deliberate and worth naming. There is **no message broker** —
+> the queue is Postgres, because a separate broker means the queue and the data can
+> disagree, and everything here depends on the claim and the send row committing
+> in one transaction. And there is **no ORM-generated schema**: migrations are
+> hand-written Alembic, because the partial indexes and CHECK constraints that
+> hold the state machine together are not things an ORM emits."*
+
+## What you will see (~40 s)
+
+> *"Part one, about twenty minutes, is the working system: a brand-new user with
+> nothing connected, one query fanning out with a source deliberately slowed, the
+> confirm gate, a double-tapped send producing exactly one message — verified in
+> the recipient's actual mailbox, not just on my status page — a revoked grant
+> repaired in one click, and the state I am most pleased with, which is the one
+> where the system admits it does not know."*
+
+> *"Part two is the architecture and the tradeoffs, including the things I got
+> wrong and how I found them."*
 
 ---
 
@@ -215,6 +279,39 @@ sources are contributing, because the message I just sent is genuinely there."*
 > returns 200 with `Idempotent-Replayed: true` and the same
 > `provider_message_id`, rather than 409. A retried request that already
 > succeeded is not a client error.
+
+### Then show the provider itself — the independent witness
+
+**Do:** Switch to the **actual Gmail inbox** for `testuser.inbound@gmail.com`,
+and to **`#social` in the Unified Search Sandbox** Slack workspace. Point at the
+single message in each. Then switch back.
+
+**Say:** *"That was still my application telling you what my application did. So
+here is Gmail itself, and here is the Slack channel. One message in each. This
+is the only evidence that actually settles it — everything else is a system
+vouching for itself."*
+
+This is worth the twenty seconds it costs. The brief asks specifically for a
+retried send *"evidenced in the recipient's mailbox and in the send detail
+view"*, and this is the half that no amount of good UI can substitute for.
+
+> 🔒 **Before you screen-share either account, check all four.** These are your
+> real accounts on a recording you are sending to strangers.
+>
+> - **Sign out of `bajwa.anees@gmail.com`,** or use a separate browser profile
+>   / guest window that has only the throwaway signed in. Gmail's account
+>   switcher shows every signed-in address, and Chrome's profile chip shows your
+>   name and photo.
+> - **Use the Slack sandbox, not your work workspace.** Both are likely open.
+>   The sandbox is `Unified Search Sandbox`; the workspace switcher and unread
+>   badges from other workspaces are visible in the sidebar.
+> - **Close unrelated tabs** — the tab strip is on camera the whole time, and
+>   titles leak inbox counts, client names and ticket numbers.
+> - **Silence notifications** (macOS Focus / Do Not Disturb). A Slack or mail
+>   toast mid-recording can put a real person's name and message on screen.
+>
+> Rehearse the tab switch once. Fumbling into the wrong inbox live is the one
+> mistake in this demo you cannot edit out afterwards.
 
 ---
 
@@ -623,17 +720,19 @@ accumulate duplicates.
 
 | Segment | Target | Cut if long? |
 |---|---|---|
+| **Opening** — what it is, the stack and why | 2:30 | trim the stack table |
 | Sign-in, brand-new user | 2:00 | no |
 | Connections | 1:30 | trim |
 | Unified search + slow source | 2:30 | **never** |
 | Compose → gate | 2:00 | no |
-| Double-tap → provider evidence | 2:30 | **never** |
+| Double-tap → send detail | 2:00 | **never** |
+| **Gmail + Slack, the independent witness** | 0:30 | **never** |
 | Revoke → reconnect | 2:30 | no |
 | History + failure detail | 2:30 | trim |
 | The `uncertain` state | 2:30 | **never** |
 | Mobile | 1:00 | cut first |
 | `curl`, no UI | 1:30 | trim |
-| **Part one** | **~20:00** | |
+| **Part one (incl. opening)** | **~23:00** | |
 | Adapters | 2:30 | |
 | Multi-account OAuth | 3:00 | |
 | Send gate + crash window | 4:00 | **never** |
@@ -645,5 +744,13 @@ accumulate duplicates.
 | Closing | 0:30 | no |
 | **Part two** | **~18:30** | |
 
-Full run is long for a 30-minute ceiling — take the three marked cuts and trim
-the "trim" rows and you land near 27. The four **never** rows are the submission.
+Everything is ~41 minutes, well over the 30-minute ceiling — this is a menu, not
+a running order to read end to end.
+
+**To land near 28:** take the three marked cuts (mobile, job runtime,
+deployment), trim the "trim" rows, and shorten the opening's stack table to the
+three choices you most want to defend — Postgres-as-the-queue, no message broker,
+and push-driven workers. That is ~10 minutes recovered.
+
+The five **never** rows are the submission. If you are running out of time,
+protect those and let part two get shorter.
