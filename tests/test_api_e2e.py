@@ -299,6 +299,22 @@ def test_an_uncertain_send_is_resolved_not_retried(live_server: str) -> None:
         assert forced.status_code == 200, forced.text
         assert forced.json()["state"] == "in_flight"
 
+        # 🔴 And it has to actually go out. `in_flight` is a promise, not a
+        # delivery, and this is the one resolution whose entire purpose is that
+        # the next attempt *dispatches* rather than reconciling — the user has
+        # answered the question the probe could not. Asserting the state the
+        # endpoint returns and stopping there would pass just as happily if the
+        # job were never woken, which is precisely how a resolution that leaves
+        # a send stranded forever would reach a reviewer.
+        settled_resend = _await_send(client, auth, resend)
+        assert settled_resend["state"] == "delivered", (
+            f"a forced resend must dispatch and land, got {settled_resend['state']}"
+        )
+        assert settled_resend["provider_message_id"] not in (None, "", "operator-attested"), (
+            "a forced resend is delivered by the provider, so it carries a provider id — "
+            "an operator attestation here would mean nothing was actually sent"
+        )
+
         # An already-settled send cannot be resolved twice.
         again = client.post(
             f"/v1/sends/{marked}/resolve",

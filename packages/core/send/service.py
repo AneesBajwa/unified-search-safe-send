@@ -590,6 +590,22 @@ async def resolve_send(
             ),
             {"id": send_id, "user_id": user_id},
         )
+        # 🔴 The send must come out of this with runnable work behind it, and
+        # that takes both branches rather than either one.
+        #
+        # A send reaches `uncertain` because `reconcile_send` parked it and
+        # `run_send` then **returned normally** — so its job is `succeeded`,
+        # which `operator_retry` does not match (it resumes `parked`/`failed`).
+        # Taking its result on trust left the row `in_flight` with no job at
+        # all, and nothing recovers that: the sweeper reclaims expired *leases*,
+        # and there is no lease on a job that already finished. The one
+        # resolution whose entire purpose is to dispatch quietly did nothing,
+        # for ever.
+        #
+        # So: resume the old job when it is resumable, otherwise book new work.
+        # `enqueue` returning None means a live duplicate already exists, which
+        # is also "work is scheduled" — the partial unique index is scoped to
+        # `ready`/`running` precisely so a finished job cannot block this.
         job_id = await session.scalar(
             text(
                 "SELECT id FROM jobs WHERE kind = 'send' AND ref_id = :ref "
@@ -597,15 +613,14 @@ async def resolve_send(
             ),
             {"ref": send_id},
         )
-        if job_id is None:
+        resumed = job_id is not None and await queue.operator_retry(session, int(job_id))
+        if not resumed:
             await queue.enqueue(
                 session,
                 kind=JobKind.SEND,
                 ref_id=send_id,
                 partition_key=f"{_state_value(row['provider'])}:{row['connection_id']}",
             )
-        else:
-            await queue.operator_retry(session, int(job_id))
 
     refreshed = await load_send(session, send_id, user_id=user_id)
     assert refreshed is not None

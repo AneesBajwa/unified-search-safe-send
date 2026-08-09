@@ -501,6 +501,75 @@ async def test_an_uncertain_send_is_never_auto_retried(
     assert body["uncertainty"]["verify_url"]
 
 
+async def test_a_forced_resend_leaves_runnable_work_even_though_its_job_succeeded(
+    api_client: tuple[Any, dict[str, str]],
+) -> None:
+    """The mechanism behind "It is not there — send it again".
+
+    🔴 This is the shape of a bug that shipped. A send reaches ``uncertain``
+    because ``reconcile_send`` parks it and ``run_send`` then **returns
+    normally** — so the job is ``succeeded``. ``operator_retry`` only resumes
+    ``parked``/``failed``, so it matched nothing, and its result was taken on
+    trust: the send went to ``in_flight`` with no job behind it and no lease for
+    the sweeper to reclaim. Stranded, silently, for ever.
+
+    Asserting the state the endpoint returns would not have caught it — the
+    endpoint said ``in_flight`` and was telling the truth about the row. What
+    catches it is asking whether anything is actually scheduled.
+    """
+    client, headers = api_client
+    created = await _make_draft(client, headers)
+    sent = await client.post(
+        f"/v1/drafts/{created['draft']['id']}/send",
+        json={"confirmed_sha256": created["confirmation"]["confirm_sha256"]},
+        headers=headers,
+    )
+    send_id = uuid.UUID(sent.json()["send_id"])
+
+    await _drain_jobs()  # the job runs and, having done its work, succeeds
+
+    async with session_scope() as session:
+        job_state = await session.scalar(
+            text("SELECT state::text FROM jobs WHERE kind = 'send' AND ref_id = :ref"),
+            {"ref": send_id},
+        )
+        # The precondition that made the bug reachable. If this ever becomes
+        # `parked`, the fix below is still correct but this test is no longer
+        # exercising the case it was written for.
+        assert job_state == "succeeded", f"expected a finished job, got {job_state}"
+
+        await session.execute(
+            text(
+                "UPDATE sends SET state = 'uncertain', dispatched_at = now(), "
+                "reconcile_attempts = 3, provider_message_id = NULL, delivered_at = NULL "
+                "WHERE id = :id"
+            ),
+            {"id": send_id},
+        )
+        await session.commit()
+
+    resolved = await client.post(
+        f"/v1/sends/{send_id}/resolve",
+        json={"resolution": "forced_resend"},
+        headers=headers,
+    )
+    assert resolved.status_code == 200, resolved.text
+    assert resolved.json()["state"] == "in_flight"
+
+    async with session_scope() as session:
+        runnable = await session.scalar(
+            text(
+                "SELECT count(*) FROM jobs WHERE kind = 'send' AND ref_id = :ref "
+                "AND state IN ('ready','running')"
+            ),
+            {"ref": send_id},
+        )
+    assert runnable == 1, (
+        "a forced resend must leave exactly one runnable job — the send is "
+        f"in_flight with {runnable} scheduled, which is how it strands"
+    )
+
+
 async def test_retrying_a_delivered_send_is_a_no_op_returning_the_original_result(
     api_client: tuple[Any, dict[str, str]],
 ) -> None:
