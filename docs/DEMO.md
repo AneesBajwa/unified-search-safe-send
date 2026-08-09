@@ -314,19 +314,36 @@ dispatched, how many times we probed, and a link into the user's own mailbox."*
 
 *"A system that says 'failed' when it means 'I don't know' is lying to you."*
 
-### Both resolutions actually work — show one
+### Both resolutions work — on camera, click only the first one
 
-**Do:** Pick one and click it.
+**Do:** Click **"I can see it — mark it delivered"**. Talk through the other one
+rather than clicking it.
 
 - **"I can see it — mark it delivered"** records an operator attestation. The
   provider id becomes `operator-attested`, because a person's word and a
-  provider's receipt are different claims and the difference is the whole content
-  of this state.
-- **"It is not there — send it again"** is the only path in the system that clears
-  `dispatched_at`. With it set the worker reconciles instead of dispatching; the
-  user has answered the question the probe could not, so the next attempt goes
-  out. Watch it land as `delivered` with a **new** provider id and the attempt
-  count continuing rather than resetting.
+  provider's receipt are different claims, and that difference is the entire
+  content of this state. Safe to demo: it touches no provider.
+- **"It is not there — send it again"** clears `dispatched_at`, which is what
+  makes the next attempt *dispatch* instead of reconcile. Describe it; do not
+  click it live.
+
+> 🛑 **Why not click it on camera.** `forced_resend` takes the operator at their
+> word. If the message *did* actually arrive and you say it did not, the system
+> obediently sends a second one — and you have just produced a visible duplicate
+> in the middle of a demo whose headline claim is that it never double-sends.
+>
+> I did exactly this while testing and put two copies in the Slack sandbox. The
+> system was correct; my premise was false. The distinction is worth stating
+> plainly: **the machinery never sends twice on its own — not under a double-tap,
+> a retried request, or a crash at any commit seam. What it cannot do is overrule
+> a human who asserts the first one never arrived.** That is not a hole, it is
+> the only sane escape hatch, which is why the button is worded as a statement of
+> fact — "It is not there" — rather than as a retry, and why `uncertain` is never
+> offered a plain retry at all.
+>
+> If you do want to show it landing, use the **seeded** `uncertain` row: it hangs
+> off a placeholder connection with no token, so the resend is attempted and
+> fails honestly without touching a real provider.
 
 > 🔴 **Worth saying out loud, if you are comfortable:** the forced-resend path was
 > broken until I wrote this run-through. A send reaches `uncertain` because
@@ -545,6 +562,18 @@ the demo deterministic.
 transition is a compare-and-swap scoped to `state = 'uncertain'`, so the second
 one changes nothing and the API refuses it by name. The audit row is written
 first and unconditionally, so who decided what survives regardless.
+
+**"Doesn't `forced_resend` break your exactly-once claim?"** — No, and the
+distinction is the interesting part. The machinery never sends twice on its own:
+not under a double-tap, a retried request, or a crash at any commit seam between
+dispatch and record. `forced_resend` is a human explicitly asserting "the first
+one did not arrive." If that assertion is wrong, a second message goes out —
+because no amount of engineering can protect a provider that offers no
+idempotency key from an operator stating something untrue. That is exactly why
+`uncertain` is never offered a plain retry, why the button is worded as a
+statement of fact rather than an action, and why the alternative resolution
+records an attestation instead of inventing a provider receipt. I found this the
+hard way: I asserted it falsely during testing and produced a duplicate.
 
 **"How would you add a fourth source?"** — One adapter file implementing the
 protocol, one line in the registry. The merge layer cannot name a source and
