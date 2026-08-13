@@ -162,9 +162,14 @@ export function ConfirmDialog() {
         </div>
 
         {/* 3 and 4. Distinct, separated, disabled on press, and the returned
-            send state shown immediately rather than a spinner. */}
-        <footer className="gate-actions">
-          {settled ? (
+            send state shown immediately rather than a spinner.
+
+            The settled block is its own region rather than a child of the
+            action row. As a grid item inside a column-flow parent it collapsed
+            into a narrow right-pinned column with dead canvas beside it; out
+            here it cannot. */}
+        {settled ? (
+          <>
             <div className="gate-settled">
               <p className="gate-settled-line">
                 <StateBadge state={settled.send.state} />
@@ -177,52 +182,51 @@ export function ConfirmDialog() {
                   ? "This was a duplicate — the same message, not a second one."
                   : "Recorded. It is now yours to follow."}
               </p>
+            </div>
+            <footer className="gate-actions">
               <button
                 type="button"
-                className="button button-primary gate-confirm"
-                onClick={() => navigate(`/history/sends/${settled.send.send_id}`)}
-              >
-                Open the send
-              </button>
-              <div className="gate-gap" />
-              <button
-                type="button"
-                className="button button-cancel"
+                className="button button-lg"
                 onClick={() => navigate("/history")}
               >
                 Done
               </button>
-            </div>
-          ) : (
-            <>
               <button
                 type="button"
-                className="button button-primary gate-confirm"
-                disabled={pressed || send.isPending}
-                onClick={() => {
-                  if (inFlight.current) return;
-                  inFlight.current = true;
-                  setPressed(true);
-                  send.mutate({
-                    draftId: draft.data.draft.id,
-                    confirmedSha256: confirmation.confirm_sha256,
-                  });
-                }}
+                className="button button-primary button-lg"
+                onClick={() => navigate(`/history/sends/${settled.send.send_id}`)}
               >
-                {pressed ? "Sending…" : "Send it"}
+                Open the send
               </button>
-              {/* The gap is the defence. On a phone these are never adjacent. */}
-              <div className="gate-gap" />
-              <button
-                type="button"
-                className="button button-cancel"
-                onClick={() => navigate(-1)}
-              >
-                Cancel
-              </button>
-            </>
-          )}
-        </footer>
+            </footer>
+          </>
+        ) : (
+          <footer className="gate-actions">
+            <button
+              type="button"
+              className="button button-lg"
+              onClick={() => navigate(-1)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="button button-primary button-lg"
+              disabled={pressed || send.isPending}
+              onClick={() => {
+                if (inFlight.current) return;
+                inFlight.current = true;
+                setPressed(true);
+                send.mutate({
+                  draftId: draft.data.draft.id,
+                  confirmedSha256: confirmation.confirm_sha256,
+                });
+              }}
+            >
+              {pressed ? "Sending…" : "Send it"}
+            </button>
+          </footer>
+        )}
       </section>
     </div>
   );

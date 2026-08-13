@@ -4,6 +4,7 @@ import { useCreateSearch, useRerunSearch, useSearch, useSearchStream } from "../
 import { EmptyState, SeedBadge } from "../components/EmptyState";
 import { ResultCard } from "../components/ResultCard";
 import { SourceNotice } from "../components/SourceNotice";
+import { SourcePanel } from "../components/SourcePanel";
 import { SourceStatusChip } from "../components/SourceStatusChip";
 import { summariseSources } from "../lib/summariseSources";
 import { useConnectFlow } from "../lib/useConnectFlow";
@@ -103,79 +104,90 @@ export function SearchPage() {
       ) : null}
 
       {data ? (
-        <>
-          <div className="search-summary">
-            <h2 className="search-query">
-              {data.query} <SeedBadge isSeed={data.is_seed} />
-            </h2>
-            <p className="search-progress" aria-live="polite">
-              {data.finished ? (
-                summariseSources(data.results.length, sources)
-              ) : (
-                <>
-                  {reported} of {sources.length} sources reported · showing partial results
-                </>
-              )}
-            </p>
-          </div>
-
-          <div className="chips">
-            {sources.map((source) => (
-              <SourceStatusChip
-                key={keyOf(source)}
-                source={source}
-                searchFinished={data.finished}
-                disambiguate={(perSource.get(source.source) ?? 0) > 1}
-                onAction={connect.start}
-              />
-            ))}
-          </div>
-
-          {problems.length > 0 ? (
-            <div className="notices">
-              {problems.map((source) => (
-                <SourceNotice key={keyOf(source)} source={source} onAction={connect.start} />
-              ))}
-            </div>
-          ) : null}
-
-          {data.results.length === 0 ? (
-            <EmptyState
-              title={data.finished ? "No matches" : "Nothing has landed yet"}
-            >
-              {data.finished
-                ? "Check the source chips above. A source that could not be reached is not the same as a source with nothing in it."
-                : "Sources report as they finish, so results appear here one source at a time."}
-            </EmptyState>
-          ) : (
-            <div className="results">
-              {data.results.map((result) => (
-                <ResultCard key={`${result.source}:${result.id}`} result={result} />
-              ))}
-            </div>
-          )}
-
-          {data.finished ? (
-            <div className="search-footer">
-              <button
-                type="button"
-                className="button"
-                disabled={rerun.isPending}
-                onClick={() =>
-                  rerun.mutate(data.search_id, {
-                    onSuccess: (created) => navigate(`/search/${created.search_id}`),
-                  })
-                }
-              >
-                {rerun.isPending ? "Running…" : "Run it again"}
-              </button>
-              <p className="muted">
-                A rerun is a new search. This one stays exactly as it is — including what
-                failed, which is the part worth keeping.
+        <div className="search-layout">
+          <div className="search-main">
+            <div className="search-summary">
+              <h2 className="search-query">
+                {data.query} <SeedBadge isSeed={data.is_seed} />
+              </h2>
+              <p className="search-progress" aria-live="polite">
+                {data.finished ? (
+                  summariseSources(data.results.length, sources)
+                ) : (
+                  <>
+                    {reported} of {sources.length} sources reported · showing partial results
+                  </>
+                )}
               </p>
             </div>
-          ) : null}
-        </>
+
+            <div className="chips">
+              {sources.map((source) => (
+                <SourceStatusChip
+                  key={keyOf(source)}
+                  source={source}
+                  searchFinished={data.finished}
+                  disambiguate={(perSource.get(source.source) ?? 0) > 1}
+                  onAction={connect.start}
+                />
+              ))}
+            </div>
+
+            {problems.length > 0 ? (
+              <div className="notices">
+                {problems.map((source) => (
+                  <SourceNotice key={keyOf(source)} source={source} onAction={connect.start} />
+                ))}
+              </div>
+            ) : null}
+
+            {data.results.length === 0 ? (
+              <EmptyState title={data.finished ? "No matches" : "Nothing has landed yet"}>
+                {data.finished
+                  ? "Check the source chips above. A source that could not be reached is not the same as a source with nothing in it."
+                  : "Sources report as they finish, so results appear here one source at a time."}
+              </EmptyState>
+            ) : (
+              <div className="results">
+                {data.results.map((result) => (
+                  <ResultCard key={`${result.source}:${result.id}`} result={result} />
+                ))}
+              </div>
+            )}
+
+            {data.finished ? (
+              <div className="search-footer">
+                <button
+                  type="button"
+                  className="button"
+                  disabled={rerun.isPending}
+                  onClick={() =>
+                    rerun.mutate(data.search_id, {
+                      onSuccess: (created) => navigate(`/search/${created.search_id}`),
+                    })
+                  }
+                >
+                  {rerun.isPending ? "Running…" : "Run it again"}
+                </button>
+                <p className="muted">
+                  A rerun is a new search. This one stays exactly as it is — including what
+                  failed, which is the part worth keeping.
+                </p>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="search-side">
+            <SourcePanel sources={sources} reported={reported} />
+            {problems.length > 0 ? (
+              <div className="notices">
+                {problems.map((source) => (
+                  <SourceNotice key={keyOf(source)} source={source} onAction={connect.start} />
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </div>
       ) : null}
 
       {searchId && snapshot.isError ? (

@@ -86,23 +86,28 @@ export function ConnectionsPage() {
         </EmptyState>
       ) : null}
 
-      <ul className="rows rows-cards">
-        {rows.map((row) => (
-          <ConnectionRow
-            key={row.id}
-            connection={row}
-            onConnect={connect.start}
-            busy={connect.phase === "waiting"}
-          />
-        ))}
-      </ul>
+      {/* Only when there is something to put in it. A `.panel` has a border and
+          a shadow, so rendering it empty left a 2px bordered strip under the
+          empty state — on the screen a brand-new user sees first. */}
+      {rows.length > 0 ? (
+        <ul className="panel panel-list">
+          {rows.map((row) => (
+            <ConnectionRow
+              key={row.id}
+              connection={row}
+              onConnect={connect.start}
+              busy={connect.phase === "waiting"}
+            />
+          ))}
+        </ul>
+      ) : null}
 
       <h3 className="section-head">Add a connection</h3>
-      <ul className="rows rows-cards">
+      <ul className="panel panel-list">
         {available.map((provider) => {
           const already = connectedProviders.has(provider.provider);
           return (
-            <li key={provider.provider} className="card connection">
+            <li key={provider.provider} className="panel-item connection">
               <div className="connection-head">
                 <span className="connection-name">{sourceLabel(provider.provider)}</span>
                 {provider.configured ? null : (
@@ -195,7 +200,7 @@ function ConnectionRow({
     connection.scopes_ok === false && missingScopes.length > 0 && knownScopes.length > 0;
 
   return (
-    <li className="card connection" data-status={connection.status}>
+    <li className="panel-item connection" data-status={connection.status}>
       <div className="connection-head">
         <span className="connection-name">{connection.display_name}</span>
         {/* 🔴 Green is for `active` and nothing else. This used to be
