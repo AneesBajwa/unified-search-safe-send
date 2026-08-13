@@ -1,1 +1,229 @@
-/* App shell: bars, rail, canvas. Filled in Task 5. */
+/*
+ * The app shell.
+ *
+ * Below 64rem: top bar, single column, bottom tab bar — every primary
+ * destination inside a thumb's reach, which is a one-handed decision rather
+ * than a fashion.
+ *
+ * From 64rem: a left rail, and the width that buys is spent on the Search
+ * page's source panel (screens.css) rather than on wider margins.
+ */
+
+.app {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ------------------------------------------------------ top bar (mobile) */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 0 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+/* A solid mark. The gradient it replaces is the second most recognisable
+   generated-app signature after periwinkle-on-black. */
+.brand-mark {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-sm);
+  background: var(--ink);
+}
+
+.brand-name {
+  font-size: 13.5px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  min-width: 0;
+}
+
+.identity {
+  max-width: 44vw;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ------------------------------------------------------------- tab bar */
+
+.tabbar {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 20;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  padding-bottom: var(--safe-bottom);
+}
+
+.navlink {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: 54px;
+  padding: 6px 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.navlink-on {
+  color: var(--ink);
+}
+
+.navicon {
+  flex: none;
+}
+
+/* While the gate is open there is nowhere else to be. */
+.app[data-gate="open"] .topbar,
+.app[data-gate="open"] .tabbar,
+.app[data-gate="open"] .rail {
+  display: none;
+}
+
+/* ------------------------------------------------------------- content */
+
+.app-main {
+  flex: 1;
+  width: 100%;
+  padding: 16px 16px calc(76px + var(--safe-bottom));
+}
+
+.page {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+  width: 100%;
+  max-width: 58rem;
+  margin: 0 auto;
+}
+
+.page-head {
+  display: grid;
+  gap: 6px;
+}
+
+/* The rail does not exist below 64rem. */
+.rail {
+  display: none;
+}
+
+/* Signed out: no rail, no tab bar, so nothing to leave room for. */
+.app-bare .app-main {
+  padding-bottom: 24px;
+}
+
+/* --------------------------------------------------- 40rem: density only */
+
+@media (min-width: 40rem) {
+  .app-main {
+    padding: 20px 24px 48px;
+  }
+}
+
+/* ----------------------------------------------------- 64rem: the shell */
+
+@media (min-width: 64rem) {
+  .app {
+    flex-direction: row;
+  }
+
+  .topbar,
+  .tabbar {
+    display: none;
+  }
+
+  .rail {
+    position: sticky;
+    top: 0;
+    align-self: flex-start;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: none;
+    width: 214px;
+    height: 100dvh;
+    padding: 14px 12px;
+    background: var(--surface);
+    border-right: 1px solid var(--line);
+  }
+
+  .rail .brand {
+    padding: 4px 8px 16px;
+  }
+
+  .rail .navlink {
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 10px;
+    min-height: 38px;
+    padding: 8px 10px;
+    border-radius: var(--r);
+    font-size: 13.5px;
+  }
+
+  .rail .navlink-on {
+    background: var(--surface-2);
+    color: var(--ink);
+    font-weight: 650;
+    box-shadow: inset 2px 0 0 0 var(--ink);
+  }
+
+  .rail-foot {
+    display: grid;
+    gap: 4px;
+    margin-top: auto;
+    padding: 12px 10px 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .rail-foot .identity {
+    max-width: 100%;
+  }
+
+  .rail-foot .button {
+    justify-content: flex-start;
+    padding: 0;
+  }
+
+  .app-main {
+    flex: 1;
+    min-width: 0;
+    padding: 24px;
+  }
+}

@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { clearKey, storedIdentity, storedKey } from "./api/client";
+import { NavIcon, type NavIconName } from "./components/NavIcon";
 import { ComposePage } from "./routes/ComposePage";
 import { ConfirmDialog } from "./routes/ConfirmDialog";
 import { ConnectionsPage } from "./routes/ConnectionsPage";
@@ -20,7 +21,7 @@ import { SignInPage } from "./routes/SignInPage";
  * source-agnosticism test on the backend. Whether a send may proceed, whether an
  * error is retryable and how results rank are all read from API responses.
  *
- * Navigation is a bottom bar on a phone and a header row from 40rem up. That is
+ * Navigation is a bottom bar on a phone and a left rail from 64rem up. That is
  * a thumb decision rather than a fashion: every primary destination has to be
  * reachable one-handed, and the confirm sheet deliberately covers the bar —
  * while the gate is open, there is nowhere else to be.
@@ -32,10 +33,7 @@ export default function App() {
 
   if (!signedIn) {
     return (
-      <div className="app">
-        <header className="topbar topbar-bare">
-          <Brand />
-        </header>
+      <div className="app app-bare">
         <main className="app-main">
           <SignInPage onSignedIn={() => setSignedIn(true)} />
         </main>
@@ -47,29 +45,37 @@ export default function App() {
   // only be somewhere else to tap.
   const gateOpen = location.pathname.startsWith("/confirm/");
 
+  const signOut = () => {
+    clearKey();
+    queryClient.clear();
+    setSignedIn(false);
+  };
+
   return (
     <div className="app" data-gate={gateOpen ? "open" : "closed"}>
+      <nav className="rail" aria-label="Primary">
+        <Brand />
+        <Nav />
+        <div className="rail-foot">
+          <span className="identity" title="Signed in as">
+            {storedIdentity() ?? "signed in"}
+          </span>
+          <button type="button" className="button button-quiet button-sm" onClick={signOut}>
+            Sign out
+          </button>
+        </div>
+      </nav>
+
       <header className="topbar">
         <Brand />
         <div className="topbar-right">
           <span className="identity" title="Signed in as">
             {storedIdentity() ?? "signed in"}
           </span>
-          <button
-            type="button"
-            className="button button-quiet"
-            onClick={() => {
-              clearKey();
-              queryClient.clear();
-              setSignedIn(false);
-            }}
-          >
+          <button type="button" className="button button-quiet button-sm" onClick={signOut}>
             Sign out
           </button>
         </div>
-        <nav className="topnav">
-          <Nav />
-        </nav>
       </header>
 
       <main className="app-main">
@@ -95,16 +101,16 @@ function Brand() {
   return (
     <div className="brand">
       <span className="brand-mark" aria-hidden="true" />
-      <span className="brand-name">Unified Search &amp; Safe Send</span>
+      <span className="brand-name">Unified Search</span>
     </div>
   );
 }
 
-const LINKS = [
-  { to: "/", label: "Search", end: true },
-  { to: "/compose", label: "Compose", end: false },
-  { to: "/history", label: "History", end: false },
-  { to: "/connections", label: "Accounts", end: false },
+const LINKS: Array<{ to: string; label: string; end: boolean; icon: NavIconName }> = [
+  { to: "/", label: "Search", end: true, icon: "search" },
+  { to: "/compose", label: "Compose", end: false, icon: "compose" },
+  { to: "/history", label: "History", end: false, icon: "history" },
+  { to: "/connections", label: "Accounts", end: false, icon: "accounts" },
 ];
 
 function Nav() {
@@ -117,6 +123,7 @@ function Nav() {
           end={link.end}
           className={({ isActive }) => (isActive ? "navlink navlink-on" : "navlink")}
         >
+          <NavIcon name={link.icon} />
           {link.label}
         </NavLink>
       ))}
