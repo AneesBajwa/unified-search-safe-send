@@ -15,6 +15,12 @@
 ## Ground rules for the executor
 
 - **Read the spec first.** Every value in this plan traces to a section there.
+- **Verify with the whole gate, every task**, not just the one test file you
+  touched: `npm run typecheck && npm run lint && npm test && npm run build`.
+  Task 2 ran `vitest` alone on the file it had just written, and left
+  `typecheck` and `build` red for an entire task before anyone noticed —
+  `tokens.test.ts` imports `node:fs` and `tsconfig.app.json` did not list
+  `node` in `types`. A green subset is not a green suite.
 - **Mobile-first.** Base rules target 375px; every desktop rule is a
   `min-width` media query. Never author desktop-first and walk it back.
 - **Two breakpoints only.** `40rem` changes control density; `64rem` changes
