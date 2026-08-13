@@ -886,11 +886,14 @@ select {
   color: var(--muted);
 }
 
+/* --muted, not --faint. This is the one place a text token sits on
+   --surface-3, and --faint measures 4.23:1 there — below AA, and at 10.5px
+   that is the least forgiving size in the system. --muted clears it. */
 .chip-mode {
   padding: 1px 6px;
   border-radius: var(--pill);
   background: var(--surface-3);
-  color: var(--faint);
+  color: var(--muted);
   font-size: 10.5px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
