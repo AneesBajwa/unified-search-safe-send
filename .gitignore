@@ -51,3 +51,6 @@ pnpm-debug.log*
 
 # The fake provider ledger (local demo state, never real data).
 .fake-provider/
+
+# superpowers brainstorm scratch
+.superpowers/
