@@ -447,8 +447,12 @@ select {
   background: var(--muted);
 }
 
+/* An 8rem basis, not 16. Flex decides where to break using the *basis*, not the
+   shrunk width, so a 16rem basis put the body on its own line in the 250px
+   source column and left the status dot stranded above it. 8rem keeps dot and
+   body together everywhere and still lets the action wrap below when narrow. */
 .notice-body {
-  flex: 1 1 16rem;
+  flex: 1 1 8rem;
   min-width: 0;
   display: grid;
   gap: 3px;
@@ -470,11 +474,19 @@ select {
   color: var(--faint);
 }
 
+/* A reconnect label carries the account name — "Reconnect Gmail ·
+   seed@example.test (seeded Gmail)" — and buttons are `nowrap` by default. In a
+   250px column that one string set the whole grid track's min-content width and
+   pushed the source panel off the right of the viewport. So this button, alone
+   among buttons, wraps and is allowed to shrink. */
 .notice-cta,
 .notice > button,
 .notice > .button {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   margin-left: auto;
+  white-space: normal;
+  text-align: center;
 }
 
 .notice-bad {

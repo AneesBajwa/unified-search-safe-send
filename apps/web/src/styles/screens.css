@@ -159,11 +159,19 @@
     gap: 20px;
   }
 
+  /* min-width: 0 or a long, unbreakable child sets this track's min-content
+     width and drags the whole grid past the viewport. */
   .search-side {
     display: grid;
     gap: 12px;
+    min-width: 0;
     position: sticky;
     top: 24px;
+  }
+
+  .search-side .panel,
+  .search-side .notice {
+    min-width: 0;
   }
 
   .search-main > .chips,
