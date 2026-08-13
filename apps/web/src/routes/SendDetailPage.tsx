@@ -60,28 +60,31 @@ export function SendDetailPage() {
         {detail.subject ? <p className="detail-subject">{detail.subject}</p> : null}
       </header>
 
-      <dl className="facts">
-        <div className="fact">
-          <dt>Attempts</dt>
-          <dd>
-            {detail.attempts} of {detail.max_attempts ?? 6} <RetryCountdown send={detail} />
-          </dd>
-        </div>
-        <div className="fact">
-          <dt>Dispatched</dt>
-          <dd>{absoluteTime(detail.dispatched_at)}</dd>
-        </div>
-        <div className="fact">
-          <dt>Delivered</dt>
-          <dd>{absoluteTime(detail.delivered_at)}</dd>
-        </div>
-        <div className="fact">
-          <dt>Provider message id</dt>
-          <dd>
-            <code>{detail.provider_message_id ?? "—"}</code>
-          </dd>
-        </div>
-      </dl>
+      <div className="panel">
+        <p className="panel-head">Delivery</p>
+        <dl className="facts">
+          <div className="fact">
+            <dt>Attempts</dt>
+            <dd>
+              {detail.attempts} of {detail.max_attempts ?? 6} <RetryCountdown send={detail} />
+            </dd>
+          </div>
+          <div className="fact">
+            <dt>Dispatched</dt>
+            <dd>{absoluteTime(detail.dispatched_at)}</dd>
+          </div>
+          <div className="fact">
+            <dt>Delivered</dt>
+            <dd>{absoluteTime(detail.delivered_at)}</dd>
+          </div>
+          <div className="fact">
+            <dt>Provider message id</dt>
+            <dd>
+              <code>{detail.provider_message_id ?? "—"}</code>
+            </dd>
+          </div>
+        </dl>
+      </div>
 
       <h3 className="section-head">Exactly what was transmitted</h3>
       <div className="body-preview">{detail.body}</div>
@@ -171,70 +174,72 @@ function UncertaintyPanel({
   };
 
   return (
-    <div className="doubt">
-      <h3 className="doubt-title">We do not know whether this arrived</h3>
-      <p className="doubt-lede">
-        It was dispatched at {absoluteTime(uncertainty.dispatched_at)} and we asked the
-        provider {uncertainty.reconcile_attempts} times without getting a usable answer.
-        This is not a failure — a failure would mean we know nothing was sent.
-      </p>
-      {uncertainty.reason ? <p className="doubt-reason">{uncertainty.reason}</p> : null}
+    <div className="panel doubt">
+      <p className="panel-head">We do not know whether this arrived</p>
+      <div className="doubt-body">
+        <p className="doubt-lede">
+          It was dispatched at {absoluteTime(uncertainty.dispatched_at)} and we asked the
+          provider {uncertainty.reconcile_attempts} times without getting a usable answer.
+          This is not a failure — a failure would mean we know nothing was sent.
+        </p>
+        {uncertainty.reason ? <p className="doubt-reason">{uncertainty.reason}</p> : null}
 
-      {/* Its own control rather than a link buried in a sentence: it is the
-          action that actually settles this, and an inline link is a 15px-tall
-          target on a phone. */}
-      <a
-        className="button doubt-verify"
-        href={uncertainty.verify_url}
-        target="_blank"
-        rel="noreferrer"
-      >
-        Look for yourself at the provider
-      </a>
-      <p className="doubt-help">
-        It takes about three seconds, and you can answer this in a way we cannot.
-      </p>
+        {/* Its own control rather than a link buried in a sentence: it is the
+            action that actually settles this, and an inline link is a 15px-tall
+            target on a phone. */}
+        <a
+          className="button doubt-verify"
+          href={uncertainty.verify_url}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Look for yourself at the provider
+        </a>
+        <p className="doubt-help">
+          It takes about three seconds, and you can answer this in a way we cannot.
+        </p>
 
-      <label className="field">
-        <span className="field-label">Note (optional)</span>
-        <input
-          value={note}
-          onChange={(event) => setNote(event.target.value)}
-          placeholder="what you saw"
-        />
-      </label>
+        <label className="field">
+          <span className="field-label">Note (optional)</span>
+          <input
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+            placeholder="what you saw"
+          />
+        </label>
 
-      <div className="doubt-actions">
-        {uncertainty.resolutions.map((resolution) => {
-          const copy = COPY[resolution] ?? { label: resolution, help: "" };
-          const armed = chosen === resolution;
-          return (
-            <div key={resolution} className="doubt-choice">
-              <button
-                type="button"
-                className={armed ? "button button-primary" : "button"}
-                disabled={resolve.isPending}
-                onClick={() => {
-                  if (!armed) {
-                    setChosen(resolution);
-                    return;
-                  }
-                  resolve.mutate({ sendId, resolution, note });
-                }}
-              >
-                {armed
-                  ? resolve.isPending
-                    ? "Recording…"
-                    : "Tap again to confirm"
-                  : copy.label}
-              </button>
-              <p className="doubt-help">{copy.help}</p>
-            </div>
-          );
-        })}
+        <div className="doubt-actions">
+          {uncertainty.resolutions.map((resolution) => {
+            const copy = COPY[resolution] ?? { label: resolution, help: "" };
+            const armed = chosen === resolution;
+            return (
+              <div key={resolution} className="doubt-choice">
+                <button
+                  type="button"
+                  className={armed ? "button button-primary" : "button"}
+                  disabled={resolve.isPending}
+                  onClick={() => {
+                    if (!armed) {
+                      setChosen(resolution);
+                      return;
+                    }
+                    resolve.mutate({ sendId, resolution, note });
+                  }}
+                >
+                  {armed
+                    ? resolve.isPending
+                      ? "Recording…"
+                      : "Tap again to confirm"
+                    : copy.label}
+                </button>
+                <p className="doubt-help">{copy.help}</p>
+              </div>
+            );
+          })}
+        </div>
+
+        {resolve.isError ? <p className="bad">{String(resolve.error)}</p> : null}
       </div>
-
-      {resolve.isError ? <p className="bad">{String(resolve.error)}</p> : null}
     </div>
   );
 }
