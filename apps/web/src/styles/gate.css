@@ -1,1 +1,206 @@
-/* The confirm gate. Filled in Task 6. */
+/* ============================================================== THE GATE ==
+
+   The highest-value component in the app. A cramped or ambiguous confirm step
+   *is* the misfire this product exists to prevent, so it gets the whole screen
+   on a phone and the layout is a fixed three-row grid: the destination never
+   scrolls away, the body owns the only scrolling region, and the actions are
+   always where the thumb expects them.
+   ========================================================================= */
+
+.gate {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  background: var(--canvas);
+}
+
+.gate-sheet {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  min-height: 0;
+  background: var(--surface);
+}
+
+/* Settled adds a fourth row between the body and the actions. */
+.gate-sheet:has(.gate-settled) {
+  grid-template-rows: auto 1fr auto auto;
+}
+
+.gate-loading {
+  display: grid;
+  gap: 12px;
+  align-content: center;
+  justify-items: center;
+  padding: 24px;
+  text-align: center;
+}
+
+.gate-head {
+  display: grid;
+  gap: 3px;
+  padding: 16px 18px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.gate-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+/* 1. The destination is the most prominent element on the screen. Verbatim —
+      never a friendly alias that could hide the real recipient. */
+.gate-destination {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+
+.gate-warning {
+  margin-top: 3px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.gate-via {
+  font-size: 12.5px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.gate-channel {
+  font-weight: 650;
+  text-transform: capitalize;
+}
+
+.gate-subject {
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.gate-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+/* 2. The only scrolling region. */
+.gate-scroll {
+  min-height: 0;
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  padding: 14px 18px 18px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.gate-body-label {
+  margin-bottom: -4px;
+}
+
+.gate-scroll .body-preview {
+  max-height: none;
+  overflow: visible;
+}
+
+.gate-digest {
+  font-size: 12px;
+  color: var(--faint);
+  overflow-wrap: anywhere;
+}
+
+.gate-error {
+  margin-top: 2px;
+}
+
+/* The settled block: its own region, full width, left-aligned. */
+.gate-settled {
+  padding: 14px 18px 0;
+}
+
+.gate-settled-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.gate-settled-id {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.gate-settled-note {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* 3 and 4. Distinct, separated, and never adjacent on a phone.
+
+   Base case (touch): stacked full-width, the primary on top, a 24px gap, and
+   the secondary at the bottom where a thumb rests. The gap *is* the defence —
+   a thumb reaching for Cancel must not be able to land on Send. */
+.gate-actions {
+  display: grid;
+  gap: 24px;
+  padding: 16px 18px calc(18px + var(--safe-bottom));
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.gate-actions > button {
+  width: 100%;
+  min-height: var(--h-lg);
+}
+
+/* DOM order is Cancel then Send. On a phone the primary goes on top. */
+.gate-actions > .button-primary {
+  order: -1;
+}
+
+@media (min-width: 40rem) {
+  /* One row, right-aligned, and the two actions are the same size — which is
+     what .actions guarantees and what the old 54px-vs-48px pair did not. */
+  .gate-actions {
+    display: flex;
+    align-items: stretch;
+    justify-content: flex-end;
+    gap: 12px;
+    min-height: var(--h-lg);
+  }
+
+  .gate-actions > button {
+    width: auto;
+    min-width: 9rem;
+    min-height: 0;
+  }
+
+  .gate-actions > .button-primary {
+    order: 0;
+  }
+
+  .gate {
+    place-items: center;
+    padding: 24px;
+    background: rgb(21 24 28 / 45%);
+  }
+
+  .gate-sheet {
+    width: min(34rem, 100%);
+    max-height: min(46rem, 100%);
+    border: 1px solid var(--line);
+    border-radius: var(--r-xl);
+    box-shadow: var(--shadow-2);
+    overflow: hidden;
+  }
+}

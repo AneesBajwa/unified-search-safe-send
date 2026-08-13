@@ -23,8 +23,9 @@ export default defineConfig({
     },
   },
   test: {
-    // One component is unit-tested and it is `SourceStatusChip` — see its test
-    // file for why that one and not the others.
+    // Unit tests are deliberately few and each one earns its place: the source
+    // chip (four states that must never collapse), the gate's footer structure
+    // (two shipped layout defects, locked), and the palette's contrast claim.
     environment: "jsdom",
     // `.ts` as well as `.tsx` — a glob that quietly matched only components
     // meant a new test file for `client.ts` was collected by nobody and passed
