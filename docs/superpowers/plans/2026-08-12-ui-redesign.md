@@ -129,7 +129,7 @@ git commit -m "docs(ui): capture the console as it stands before the redesign"
 Create `apps/web/src/styles/tokens.test.ts`:
 
 ```ts
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -214,10 +214,6 @@ describe("tokens", () => {
   it("pins light and ships no dark scheme", () => {
     expect(TOKENS).toMatch(/color-scheme:\s*light\s*;/);
     expect(TOKENS).not.toMatch(/prefers-color-scheme/);
-  });
-
-  it("has retired App.css rather than leaving it as dead weight", () => {
-    expect(existsSync(join(HERE, "..", "App.css"))).toBe(false);
   });
 });
 ```
@@ -336,9 +332,8 @@ Create `apps/web/src/styles/tokens.css`:
 cd apps/web && npx vitest run src/styles/tokens.test.ts
 ```
 
-Expected: all pass **except** `has retired App.css` — that one still fails,
-because `App.css` is deleted in Task 3. That is the intended state; leave it
-red and move on.
+Expected: all pass. (The assertion that `App.css` is gone belongs to Task 3,
+which is what deletes it — this commit stays green.)
 
 - [ ] **Step 5: Commit**
 
@@ -512,19 +507,31 @@ In `apps/web/src/App.tsx`, delete line 12:
 cd /Users/aneesbajwa/www/unified-search-safe-send && git rm apps/web/src/App.css
 ```
 
-- [ ] **Step 6: Verify**
+- [ ] **Step 6: Assert the old stylesheet is actually gone**
+
+Add to `apps/web/src/styles/tokens.test.ts`, inside the `describe("tokens")`
+block. Change the import on line 1 from `import { readFileSync }` to
+`import { existsSync, readFileSync }`.
+
+```ts
+  it("has retired App.css rather than leaving it as dead weight", () => {
+    expect(existsSync(join(HERE, "..", "App.css"))).toBe(false);
+  });
+```
+
+- [ ] **Step 7: Verify**
 
 ```bash
 cd apps/web && npx vitest run src/styles/tokens.test.ts && npm run typecheck && npm run build
 ```
 
-Expected: all token tests pass now, including `has retired App.css`.
+Expected: all token tests pass, including the new `has retired App.css`.
 Typecheck clean. Build succeeds — this is what proves the six `@import`s
 resolve.
 
 The running app will look unstyled. That is expected until Task 5.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add apps/web/src/index.css apps/web/src/styles apps/web/src/App.tsx
