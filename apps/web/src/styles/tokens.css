@@ -1,0 +1,93 @@
+/*
+ * Design tokens — "Instrument".
+ *
+ * One colour scheme, pinned. Two schemes cannot both be tuned and
+ * contrast-verified on this budget, and following the OS meant the author only
+ * ever saw one of them — the dark one, whose #7d9cff accent on near-black is
+ * the most recognisable generated-app signature there is.
+ * See docs/superpowers/specs/2026-08-12-ui-redesign-design.md §3.
+ *
+ * Every text colour here clears 4.5:1 on --surface and every interactive
+ * border clears 3:1. That is not a claim: src/styles/tokens.test.ts reads this
+ * file and computes it.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* surfaces */
+  --canvas: #f6f7f8;
+  --surface: #ffffff;
+  --surface-2: #f1f3f5;
+  --surface-3: #e8ebee;
+
+  /* text */
+  --ink: #15181c;
+  --ink-2: #3c434e;
+  --muted: #5b6472;
+  --faint: #676f7d;
+
+  /* Two line tokens, and the distinction is load-bearing.
+     --line is decorative: dividers and card edges.
+     --line-2 identifies a control, so it clears 3:1 and is visibly darker
+     than a hairline. Never lighten it below that to taste — give the control
+     a --surface-2 fill instead. */
+  --line: #e4e7eb;
+  --line-2: #8a939e;
+
+  /* The one irreversible action on a screen is the darkest thing on it.
+     Saturation is spent on state, not on buttons. */
+  --primary: #15181c;
+  --primary-hover: #000000;
+  --primary-fg: #ffffff;
+
+  /* Links, focus, selection, in-flight. Never a button fill. */
+  --accent: #0b5cd5;
+  --accent-weak: #eaf1fd;
+  --accent-line: #b9d0f5;
+
+  --ok: #0e6b3f;
+  --ok-weak: #f1f9f4;
+  --ok-line: #bfe0cd;
+
+  /* Uncertain is amber and never red: failed means we know nothing was sent,
+     uncertain means we do not know, and conflating them invites a resend. */
+  --warn: #8a5a0b;
+  --warn-weak: #fdf7ea;
+  --warn-line: #efd7a8;
+
+  --bad: #a4192c;
+  --bad-weak: #fdf3f4;
+  --bad-line: #f0c6cb;
+
+  --r-sm: 6px;
+  --r: 8px;
+  --r-lg: 10px;
+  --r-xl: 14px;
+  --pill: 999px;
+
+  /* Two elevation steps, and the second belongs to the gate alone. Depth
+     everywhere else comes from hairlines. */
+  --shadow-1: 0 1px 2px rgb(21 24 28 / 6%);
+  --shadow-2:
+    0 1px 2px rgb(21 24 28 / 6%),
+    0 12px 32px rgb(21 24 28 / 12%);
+
+  /* Control heights. Touch is the un-qualified default; >=40rem subtracts 8px.
+     --h-md at base is exactly --tap, so the 44px touch floor holds without a
+     separate rule. */
+  --tap: 44px;
+  --h-sm: 38px;
+  --h-md: 44px;
+  --h-lg: 52px;
+
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+@media (min-width: 40rem) {
+  :root {
+    --h-sm: 30px;
+    --h-md: 36px;
+    --h-lg: 44px;
+  }
+}
