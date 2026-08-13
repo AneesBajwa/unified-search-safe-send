@@ -1,1 +1,173 @@
 /* Per-screen layout. Filled in Tasks 7-11. */
+
+/* ----------------------------------------------------------------- search */
+
+.searchbar {
+  display: flex;
+  gap: 8px;
+}
+
+.searchbar input {
+  flex: 1;
+  min-width: 0;
+}
+
+.search-layout {
+  display: grid;
+  gap: 16px;
+  align-items: start;
+}
+
+.search-main {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.search-side {
+  display: none;
+}
+
+.search-summary {
+  display: grid;
+  gap: 3px;
+}
+
+.search-query {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 19px;
+  overflow-wrap: anywhere;
+}
+
+.search-progress {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.search-footer {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.results {
+  display: grid;
+  gap: 9px;
+}
+
+.result-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.result-source {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.result-time {
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+.result-title {
+  margin: 6px 0 3px;
+  font-size: 14.5px;
+  overflow-wrap: anywhere;
+}
+
+.result-snippet {
+  font-size: 13px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.result-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.result-author {
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--faint);
+  overflow-wrap: anywhere;
+}
+
+.result-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.source-panel-name {
+  font-weight: 650;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.source-panel-state {
+  margin-left: auto;
+  font-size: 11.5px;
+  font-weight: 650;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.source-panel-state.is-done {
+  color: var(--ok);
+}
+
+.source-panel-state.is-failed {
+  color: var(--bad);
+}
+
+.source-panel-state.is-retrying {
+  color: var(--warn);
+}
+
+.source-panel-state.is-running {
+  color: var(--accent);
+}
+
+/* From 64rem the width buys a standing source panel, and the chip row and
+   inline notices step aside for it. */
+@media (min-width: 64rem) {
+  .search-layout {
+    grid-template-columns: minmax(0, 1fr) 250px;
+    gap: 20px;
+  }
+
+  .search-side {
+    display: grid;
+    gap: 12px;
+    position: sticky;
+    top: 24px;
+  }
+
+  .search-main > .chips,
+  .search-main > .notices {
+    display: none;
+  }
+}
