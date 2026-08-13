@@ -2091,20 +2091,25 @@ Replace the whole of `apps/web/src/styles/gate.css`:
 }
 
 @media (min-width: 40rem) {
-  /* One row, right-aligned, and the two actions are the same size — which is
-     what .actions guarantees and what the old 54px-vs-48px pair did not. */
+  /* One row, right-aligned, and the two actions are the same size — which the
+     old 54px-vs-48px pair was not.
+
+     The height lives on the buttons, not on this row. Putting `min-height` here
+     instead does not work: box-sizing is border-box, so the row's own 16/18px
+     padding is *inside* that height, and stretched children with `min-height: 0`
+     collapse to whatever is left — 25px, measured. Equal sizing comes from both
+     buttons sharing `--h-lg`, and `stretch` then keeps them level if one wraps
+     to two lines. */
   .gate-actions {
     display: flex;
     align-items: stretch;
     justify-content: flex-end;
     gap: 12px;
-    min-height: var(--h-lg);
   }
 
   .gate-actions > button {
     width: auto;
     min-width: 9rem;
-    min-height: 0;
   }
 
   .gate-actions > .button-primary {
