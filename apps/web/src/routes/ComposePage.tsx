@@ -130,9 +130,11 @@ export function ComposePage() {
           <textarea rows={7} value={body} onChange={(event) => setBody(event.target.value)} />
         </label>
 
-        <button type="submit" className="button button-primary" disabled={createDraft.isPending}>
-          {createDraft.isPending ? "Preparing…" : "Review before sending"}
-        </button>
+        <div className="actions actions-end">
+          <button type="submit" className="button button-primary" disabled={createDraft.isPending}>
+            {createDraft.isPending ? "Preparing…" : "Review before sending"}
+          </button>
+        </div>
       </form>
 
       {refusal ? (

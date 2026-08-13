@@ -40,97 +40,103 @@ export function SignInPage({ onSignedIn }: { onSignedIn: () => void }) {
 
   return (
     <section className="page signin">
-      <header className="page-head">
-        <h2>Sign in</h2>
-        <p className="page-sub">
-          No password: an address is an account. Three states are worth seeing, so each
-          is one click away — <strong>this address</strong> has the live Gmail and Slack
-          connections, <strong>seeded</strong> has history in every status, and{" "}
-          <strong>brand-new</strong> has nothing connected at all.
-        </p>
-      </header>
+      <div className="card signin-card">
+        <div className="signin-brand">
+          <span className="brand-mark" aria-hidden="true" />
+          <span className="brand-name">Unified Search &amp; Safe Send</span>
+        </div>
+        <header className="page-head">
+          <h2>Sign in</h2>
+          <p className="page-sub">
+            No password: an address is an account. Three states are worth seeing, so each
+            is one click away — <strong>this address</strong> has the live Gmail and Slack
+            connections, <strong>seeded</strong> has history in every status, and{" "}
+            <strong>brand-new</strong> has nothing connected at all.
+          </p>
+        </header>
 
-      <form
-        className="compose"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void run(() => devLogin(email.trim()));
-        }}
-      >
-        <label className="field">
-          <span className="field-label">Email</span>
-          <input
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            type="email"
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck={false}
-            required
-          />
-        </label>
-        <button type="submit" className="button button-primary" disabled={busy}>
-          {busy ? "Signing in…" : "Sign in"}
-        </button>
-        <button
-          type="button"
-          className="button"
-          disabled={busy}
-          onClick={() => {
-            setEmail(SEEDED_EMAIL);
-            void run(() => devLogin(SEEDED_EMAIL));
-          }}
-        >
-          Sign in as the seeded demo account
-        </button>
-        <button
-          type="button"
-          className="button"
-          disabled={busy}
-          onClick={() => {
-            const fresh = `new-${Date.now().toString(36)}@example.test`;
-            setEmail(fresh);
-            void run(() => devLogin(fresh));
-          }}
-        >
-          Sign in as a brand-new user
-        </button>
-      </form>
-
-      <details className="rationale">
-        <summary>Use a key minted somewhere else</summary>
         <form
           className="compose"
           onSubmit={(event) => {
             event.preventDefault();
-            void run(() => adoptKey(key.trim(), "pasted key"));
+            void run(() => devLogin(email.trim()));
           }}
         >
           <label className="field">
-            <span className="field-label">API key</span>
+            <span className="field-label">Email</span>
             <input
-              value={key}
-              onChange={(event) => setKey(event.target.value)}
-              placeholder="sk_live_…"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              type="email"
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck={false}
+              required
             />
           </label>
-          <button type="submit" className="button" disabled={busy || !key.trim()}>
-            Use this key
+          <button type="submit" className="button button-primary" disabled={busy}>
+            {busy ? "Signing in…" : "Sign in"}
+          </button>
+          <button
+            type="button"
+            className="button"
+            disabled={busy}
+            onClick={() => {
+              setEmail(SEEDED_EMAIL);
+              void run(() => devLogin(SEEDED_EMAIL));
+            }}
+          >
+            Sign in as the seeded demo account
+          </button>
+          <button
+            type="button"
+            className="button"
+            disabled={busy}
+            onClick={() => {
+              const fresh = `new-${Date.now().toString(36)}@example.test`;
+              setEmail(fresh);
+              void run(() => devLogin(fresh));
+            }}
+          >
+            Sign in as a brand-new user
           </button>
         </form>
-      </details>
 
-      {error ? (
-        <div className="notice notice-bad">
-          <div className="notice-body">
-            <p className="notice-title">That did not work</p>
-            <p className="notice-detail">{error}</p>
+        <details className="rationale">
+          <summary>Use a key minted somewhere else</summary>
+          <form
+            className="compose"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void run(() => adoptKey(key.trim(), "pasted key"));
+            }}
+          >
+            <label className="field">
+              <span className="field-label">API key</span>
+              <input
+                value={key}
+                onChange={(event) => setKey(event.target.value)}
+                placeholder="sk_live_…"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+            </label>
+            <button type="submit" className="button" disabled={busy || !key.trim()}>
+              Use this key
+            </button>
+          </form>
+        </details>
+
+        {error ? (
+          <div className="notice notice-bad">
+            <div className="notice-body">
+              <p className="notice-title">That did not work</p>
+              <p className="notice-detail">{error}</p>
+            </div>
           </div>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </section>
   );
 }
