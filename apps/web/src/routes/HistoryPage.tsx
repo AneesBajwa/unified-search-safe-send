@@ -85,10 +85,10 @@ function SendList({ includeSeed }: { includeSeed: boolean }) {
 
   return (
     <>
-      <ul className="rows rows-cards">
+      <ul className="panel panel-list">
         {rows.map((send) => (
-          <li key={send.send_id} className="card row-card">
-            <Link className="row-link" to={`/history/sends/${send.send_id}`}>
+          <li key={send.send_id} className="panel-item">
+            <Link className="panel-link" to={`/history/sends/${send.send_id}`}>
               <span className="row-top">
                 <StateBadge state={send.state} />
                 <SeedBadge isSeed={send.is_seed} />
@@ -99,9 +99,7 @@ function SendList({ includeSeed }: { includeSeed: boolean }) {
               <span className="row-meta">
                 <RetryCountdown send={send} />
                 {send.state !== "in_flight" && send.attempts > 1 ? (
-                  <span className="countdown">
-                    {send.attempts} attempts
-                  </span>
+                  <span className="countdown">{send.attempts} attempts</span>
                 ) : null}
               </span>
             </Link>
@@ -130,10 +128,10 @@ function SearchList({ includeSeed }: { includeSeed: boolean }) {
 
   return (
     <>
-      <ul className="rows rows-cards">
+      <ul className="panel panel-list">
         {rows.map((search) => (
-          <li key={search.search_id} className="card row-card">
-            <Link className="row-link" to={`/search/${search.search_id}`}>
+          <li key={search.search_id} className="panel-item">
+            <Link className="panel-link" to={`/search/${search.search_id}`}>
               <span className="row-top">
                 <SeedBadge isSeed={search.is_seed} />
                 <span className="row-time">{relativeTime(search.created_at)}</span>
@@ -147,7 +145,7 @@ function SearchList({ includeSeed }: { includeSeed: boolean }) {
             <div className="row-actions">
               <button
                 type="button"
-                className="button button-quiet"
+                className="button button-quiet button-sm"
                 disabled={rerun.isPending}
                 onClick={() =>
                   rerun.mutate(search.search_id, {
