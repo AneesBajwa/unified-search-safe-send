@@ -76,7 +76,7 @@ describe("the gate's footer", () => {
 
     expect(buttons).toHaveLength(2);
     const sizes = new Set(
-      [...buttons].map((button) => (button.className.match(/\bbutton-(sm|lg)\b/) ?? [, "md"])[1]),
+      [...buttons].map((button) => button.className.match(/\bbutton-(sm|lg)\b/)?.[1] ?? "md"),
     );
     expect(sizes.size, "the two actions must not be different sizes").toBe(1);
   });
@@ -114,7 +114,7 @@ describe("the gate's footer", () => {
 
     expect(buttons).toHaveLength(2);
     const sizes = new Set(
-      [...buttons].map((button) => (button.className.match(/\bbutton-(sm|lg)\b/) ?? [, "md"])[1]),
+      [...buttons].map((button) => button.className.match(/\bbutton-(sm|lg)\b/)?.[1] ?? "md"),
     );
     expect(sizes.size).toBe(1);
   });
