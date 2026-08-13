@@ -669,9 +669,14 @@ button:disabled,
   background: color-mix(in srgb, var(--bad) 12%, var(--surface));
 }
 
-/* Paired actions share a size. The cluster owns the height and the children
-   are told not to fight it, so two siblings cannot disagree — which is the
-   defect this class exists to make impossible.
+/* Paired actions share a size, which is the defect this class exists to make
+   impossible: the gate shipped a 54px Send beside a 48px Cancel.
+
+   `stretch` does the work — every child ends up as tall as the tallest. The
+   height stays on the buttons and is deliberately NOT set here: box-sizing is
+   border-box, so the moment this class gains padding, a `min-height` on it
+   would swallow that padding and squash stretched children instead. The gate's
+   own footer lost 19px to exactly that before it was caught.
 
    The guarantee holds per flex line. Anywhere the pair must stack (the gate on
    a phone), do not use .actions — stack them explicitly instead. */
@@ -680,20 +685,16 @@ button:disabled,
   align-items: stretch;
   gap: 12px;
   flex-wrap: wrap;
-  min-height: var(--h-md);
 }
 
-.actions-lg {
+/* Size a whole cluster at once: every child takes the large height. */
+.actions-lg > button,
+.actions-lg > .button {
   min-height: var(--h-lg);
 }
 
 .actions-end {
   justify-content: flex-end;
-}
-
-.actions > button,
-.actions > .button {
-  min-height: 0;
 }
 
 /* ---------------------------------------------------------------- inputs */
