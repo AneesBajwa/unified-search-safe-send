@@ -9,7 +9,6 @@ import { HistoryPage } from "./routes/HistoryPage";
 import { SearchPage } from "./routes/SearchPage";
 import { SendDetailPage } from "./routes/SendDetailPage";
 import { SignInPage } from "./routes/SignInPage";
-import "./App.css";
 
 /**
  * The console. A **pure consumer** of the documented API: it holds no business

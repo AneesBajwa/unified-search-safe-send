@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -109,5 +109,9 @@ describe("tokens", () => {
     for (const file of readdirSync(HERE).filter((name) => name.endsWith(".css"))) {
       expect(readFileSync(join(HERE, file), "utf8"), file).not.toMatch(/prefers-color-scheme/);
     }
+  });
+
+  it("has retired App.css rather than leaving it as dead weight", () => {
+    expect(existsSync(join(HERE, "..", "App.css"))).toBe(false);
   });
 });
