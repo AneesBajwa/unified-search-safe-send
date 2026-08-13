@@ -2481,9 +2481,12 @@ Then replace the `{data ? ( ... ) : null}` block (lines 105–179) with:
               </div>
             ) : null}
 
+            {/* The empty-state copy is unchanged: "the source chips above" is
+                still accurate on a phone, which is where it is most often read.
+                Note the comment lives out here — inside the ternary below it
+                would sit in expression position and parse as an empty object
+                literal, which is a syntax error. */}
             {data.results.length === 0 ? (
-              {/* Copy unchanged — "the source chips above" is still accurate on
-                  a phone, which is where this is most often read. */}
               <EmptyState title={data.finished ? "No matches" : "Nothing has landed yet"}>
                 {data.finished
                   ? "Check the source chips above. A source that could not be reached is not the same as a source with nothing in it."
