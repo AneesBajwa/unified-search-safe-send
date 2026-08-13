@@ -86,7 +86,7 @@ export function ConnectionsPage() {
         </EmptyState>
       ) : null}
 
-      <ul className="rows rows-cards">
+      <ul className="panel panel-list">
         {rows.map((row) => (
           <ConnectionRow
             key={row.id}
@@ -98,11 +98,11 @@ export function ConnectionsPage() {
       </ul>
 
       <h3 className="section-head">Add a connection</h3>
-      <ul className="rows rows-cards">
+      <ul className="panel panel-list">
         {available.map((provider) => {
           const already = connectedProviders.has(provider.provider);
           return (
-            <li key={provider.provider} className="card connection">
+            <li key={provider.provider} className="panel-item connection">
               <div className="connection-head">
                 <span className="connection-name">{sourceLabel(provider.provider)}</span>
                 {provider.configured ? null : (
@@ -195,7 +195,7 @@ function ConnectionRow({
     connection.scopes_ok === false && missingScopes.length > 0 && knownScopes.length > 0;
 
   return (
-    <li className="card connection" data-status={connection.status}>
+    <li className="panel-item connection" data-status={connection.status}>
       <div className="connection-head">
         <span className="connection-name">{connection.display_name}</span>
         {/* 🔴 Green is for `active` and nothing else. This used to be
