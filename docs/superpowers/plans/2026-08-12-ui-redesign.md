@@ -135,7 +135,7 @@ git commit -m "docs(ui): capture the console as it stands before the redesign"
 Create `apps/web/src/styles/tokens.test.ts`:
 
 ```ts
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -156,9 +156,21 @@ import { describe, expect, it } from "vitest";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const TOKENS = readFileSync(join(HERE, "tokens.css"), "utf8");
 
+/**
+ * Parsed from the first `:root` block, with comments stripped first.
+ *
+ * Both of those matter. The map is last-write-wins, so a superseded value left
+ * in a trailing comment — or a colour redefined inside a later `@media` block —
+ * would silently become the value under test, and the suite would go green over
+ * a palette that fails. That is the exact failure this file exists to rule out.
+ */
 function tokens(): Record<string, string> {
+  const withoutComments = TOKENS.replace(/\/\*[\s\S]*?\*\//g, "");
+  const root = withoutComments.match(/:root\s*\{([^}]*)\}/);
+  if (!root) throw new Error("tokens.css has no :root block");
+
   const found: Record<string, string> = {};
-  for (const match of TOKENS.matchAll(/(--[a-z0-9-]+)\s*:\s*(#[0-9a-f]{6})\s*;/gi)) {
+  for (const match of root[1].matchAll(/(--[a-z0-9-]+)\s*:\s*(#[0-9a-f]{6})\s*;/gi)) {
     found[match[1]] = match[2].toLowerCase();
   }
   return found;
@@ -192,7 +204,16 @@ const ON_TINT: Array<[string, string]> = [
 describe("tokens", () => {
   it("defines every token the rest of the system references", () => {
     const found = tokens();
-    for (const name of [...TEXT, "--surface", "--canvas", "--line", "--line-2", "--primary", "--primary-fg"]) {
+    for (const name of [
+      ...TEXT,
+      ...ON_TINT.map(([, tint]) => tint),
+      "--surface",
+      "--canvas",
+      "--line",
+      "--line-2",
+      "--primary",
+      "--primary-fg",
+    ]) {
       expect(found[name], `${name} is missing from tokens.css`).toBeDefined();
     }
   });
@@ -217,9 +238,18 @@ describe("tokens", () => {
     expect(contrast(found["--line-2"], found["--surface"])).toBeGreaterThanOrEqual(3);
   });
 
-  it("pins light and ships no dark scheme", () => {
+  it("pins light, and no stylesheet in this directory ships a dark scheme", () => {
     expect(TOKENS).toMatch(/color-scheme:\s*light\s*;/);
-    expect(TOKENS).not.toMatch(/prefers-color-scheme/);
+
+    // Every stylesheet, not just this one — five more land in later tasks and
+    // an assertion that only ever reads its own file is not a guarantee.
+    for (const file of readdirSync(HERE).filter((name) => name.endsWith(".css"))) {
+      expect(readFileSync(join(HERE, file), "utf8"), file).not.toMatch(/prefers-color-scheme/);
+    }
+  });
+
+  it("has retired App.css rather than leaving it as dead weight", () => {
+    expect(existsSync(join(HERE, "..", "App.css"))).toBe(false);
   });
 });
 ```
@@ -270,7 +300,9 @@ Create `apps/web/src/styles/tokens.css`:
      --line is decorative: dividers and card edges.
      --line-2 identifies a control, so it clears 3:1 and is visibly darker
      than a hairline. Never lighten it below that to taste — give the control
-     a --surface-2 fill instead. */
+     a --surface-2 fill instead.
+     Controls bordered with this are always --surface-filled; off white it
+     measures below 3:1 and the guarantee lapses. */
   --line: #e4e7eb;
   --line-2: #8a939e;
 
@@ -1005,8 +1037,12 @@ select {
   background: var(--muted);
 }
 
+/* An 8rem basis, not 16. Flex decides where to break using the *basis*, not the
+   shrunk width, so a 16rem basis put the body on its own line in the 250px
+   source column and left the status dot stranded above it. 8rem keeps dot and
+   body together everywhere and still lets the action wrap below when narrow. */
 .notice-body {
-  flex: 1 1 16rem;
+  flex: 1 1 8rem;
   min-width: 0;
   display: grid;
   gap: 3px;
@@ -1028,11 +1064,19 @@ select {
   color: var(--faint);
 }
 
+/* A reconnect label carries the account name — "Reconnect Gmail ·
+   seed@example.test (seeded Gmail)" — and buttons are `nowrap` by default. In a
+   250px column that one string set the whole grid track's min-content width and
+   pushed the source panel off the right of the viewport. So this button, alone
+   among buttons, wraps and is allowed to shrink. */
 .notice-cta,
 .notice > button,
 .notice > .button {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   margin-left: auto;
+  white-space: normal;
+  text-align: center;
 }
 
 .notice-bad {
@@ -1773,7 +1817,7 @@ describe("the gate's footer", () => {
 
     expect(buttons).toHaveLength(2);
     const sizes = new Set(
-      [...buttons].map((button) => (button.className.match(/\bbutton-(sm|lg)\b/) ?? [, "md"])[1]),
+      [...buttons].map((button) => button.className.match(/\bbutton-(sm|lg)\b/)?.[1] ?? "md"),
     );
     expect(sizes.size, "the two actions must not be different sizes").toBe(1);
   });
@@ -1811,7 +1855,7 @@ describe("the gate's footer", () => {
 
     expect(buttons).toHaveLength(2);
     const sizes = new Set(
-      [...buttons].map((button) => (button.className.match(/\bbutton-(sm|lg)\b/) ?? [, "md"])[1]),
+      [...buttons].map((button) => button.className.match(/\bbutton-(sm|lg)\b/)?.[1] ?? "md"),
     );
     expect(sizes.size).toBe(1);
   });
@@ -2418,11 +2462,19 @@ Append to `apps/web/src/styles/screens.css`:
     gap: 20px;
   }
 
+  /* min-width: 0 or a long, unbreakable child sets this track's min-content
+     width and drags the whole grid past the viewport. */
   .search-side {
     display: grid;
     gap: 12px;
+    min-width: 0;
     position: sticky;
     top: 24px;
+  }
+
+  .search-side .panel,
+  .search-side .notice {
+    min-width: 0;
   }
 
   .search-main > .chips,
