@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -19,9 +19,21 @@ import { describe, expect, it } from "vitest";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const TOKENS = readFileSync(join(HERE, "tokens.css"), "utf8");
 
+/**
+ * Parsed from the first `:root` block, with comments stripped first.
+ *
+ * Both of those matter. The map is last-write-wins, so a superseded value left
+ * in a trailing comment — or a colour redefined inside a later `@media` block —
+ * would silently become the value under test, and the suite would go green over
+ * a palette that fails. That is the exact failure this file exists to rule out.
+ */
 function tokens(): Record<string, string> {
+  const withoutComments = TOKENS.replace(/\/\*[\s\S]*?\*\//g, "");
+  const root = withoutComments.match(/:root\s*\{([^}]*)\}/);
+  if (!root) throw new Error("tokens.css has no :root block");
+
   const found: Record<string, string> = {};
-  for (const match of TOKENS.matchAll(/(--[a-z0-9-]+)\s*:\s*(#[0-9a-f]{6})\s*;/gi)) {
+  for (const match of root[1].matchAll(/(--[a-z0-9-]+)\s*:\s*(#[0-9a-f]{6})\s*;/gi)) {
     found[match[1]] = match[2].toLowerCase();
   }
   return found;
@@ -55,7 +67,16 @@ const ON_TINT: Array<[string, string]> = [
 describe("tokens", () => {
   it("defines every token the rest of the system references", () => {
     const found = tokens();
-    for (const name of [...TEXT, "--surface", "--canvas", "--line", "--line-2", "--primary", "--primary-fg"]) {
+    for (const name of [
+      ...TEXT,
+      ...ON_TINT.map(([, tint]) => tint),
+      "--surface",
+      "--canvas",
+      "--line",
+      "--line-2",
+      "--primary",
+      "--primary-fg",
+    ]) {
       expect(found[name], `${name} is missing from tokens.css`).toBeDefined();
     }
   });
@@ -80,8 +101,13 @@ describe("tokens", () => {
     expect(contrast(found["--line-2"], found["--surface"])).toBeGreaterThanOrEqual(3);
   });
 
-  it("pins light and ships no dark scheme", () => {
+  it("pins light, and no stylesheet in this directory ships a dark scheme", () => {
     expect(TOKENS).toMatch(/color-scheme:\s*light\s*;/);
-    expect(TOKENS).not.toMatch(/prefers-color-scheme/);
+
+    // Every stylesheet, not just this one — five more land in later tasks and
+    // an assertion that only ever reads its own file is not a guarantee.
+    for (const file of readdirSync(HERE).filter((name) => name.endsWith(".css"))) {
+      expect(readFileSync(join(HERE, file), "utf8"), file).not.toMatch(/prefers-color-scheme/);
+    }
   });
 });

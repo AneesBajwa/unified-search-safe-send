@@ -31,7 +31,9 @@
      --line is decorative: dividers and card edges.
      --line-2 identifies a control, so it clears 3:1 and is visibly darker
      than a hairline. Never lighten it below that to taste — give the control
-     a --surface-2 fill instead. */
+     a --surface-2 fill instead.
+     Controls bordered with this are always --surface-filled; off white it
+     measures below 3:1 and the guarantee lapses. */
   --line: #e4e7eb;
   --line-2: #8a939e;
 
