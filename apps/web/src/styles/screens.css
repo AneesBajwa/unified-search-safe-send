@@ -2,9 +2,28 @@
 
 /* ----------------------------------------------------------------- search */
 
+/* Sticky under the top bar on a phone, a normal flow element once the rail
+   takes over. Re-running a query is the commonest thing to want after reading
+   results, and on a phone that meant scrolling all the way back up. The old
+   `top: 56px` magic number is gone — the top bar is 56px by its own min-height,
+   so this reads it rather than restating it. */
 .searchbar {
   display: flex;
   gap: 8px;
+  position: sticky;
+  top: 56px;
+  z-index: 10;
+  padding: 8px 0;
+  margin: -8px 0 0;
+  background: var(--canvas);
+}
+
+@media (min-width: 64rem) {
+  .searchbar {
+    position: static;
+    padding: 0;
+    margin: 0;
+  }
 }
 
 .searchbar input {

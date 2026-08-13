@@ -172,7 +172,8 @@ system is authored desktop-first.
 
 | Breakpoint | What changes |
 |---|---|
-| `40rem` (640px) | **Control density.** Buttons and inputs shed 8px, inputs go 16px → 14px, the gate footer becomes a right-aligned row. |
+| `40rem` (640px) | **Layout only** — the gate footer becomes a right-aligned row. |
+| `40rem` **and** `pointer: fine` | **Control density.** Buttons and inputs shed 8px and inputs go 16px → 14px. Pointer-gated, so a touch tablet keeps both the 44px floor and the 16px anti-zoom input size. |
 | `64rem` (1024px) | **Shell.** Top bar and tab bar give way to the left rail; the Search page gains its source panel. |
 
 A control-density change earlier than the shell change is deliberate: a 700px
@@ -185,16 +186,23 @@ tablet window wants pointer-sized controls but not a nav rail.
 Two orthogonal axes, replacing today's single `.button` with ad-hoc overrides.
 
 **Size** — authored mobile-first, so the touch sizes are the un-qualified
-default and `≥40rem` subtracts 8px:
+default and the density block subtracts from them:
 
-| | base (touch) | `≥40rem` (pointer) |
+| | base (touch) | `≥40rem` **and** `pointer: fine` |
 |---|---|---|
-| `sm` | 38px | 30px |
+| `sm` | 44px | 30px |
 | `md` (default) | 44px | 36px |
 | `lg` | 52px | 44px |
 
-`md` at base is exactly `--tap`, so the 44px floor holds on touch without a
-separate rule.
+**Every base size is at or above `--tap`, including `sm`.** An earlier draft had
+`sm` at 38px, which contradicted the touch-target rule below and would have put
+the History tabs, the seed filter and Sign out under the floor on a phone. Small
+means small on a pointer, not on a thumb.
+
+The density block is gated on `pointer: fine` as well as width. Width alone is a
+proxy for input device, and it is wrong on precisely the devices the floor
+exists for: an iPad in portrait is 768px and touch-only, and a width-only rule
+handed it 30px tab targets.
 
 **Variant** — `primary` (ink fill, white text), `secondary` (white fill,
 `--line-2` border, `--surface-2` on hover), `quiet` (transparent, accent text,

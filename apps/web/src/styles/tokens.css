@@ -75,18 +75,24 @@
     0 1px 2px rgb(21 24 28 / 6%),
     0 12px 32px rgb(21 24 28 / 12%);
 
-  /* Control heights. Touch is the un-qualified default; >=40rem subtracts 8px.
-     --h-md at base is exactly --tap, so the 44px touch floor holds without a
-     separate rule. */
+  /* Control heights. Touch is the un-qualified default and *every* size sits at
+     or above --tap, including --h-sm: a "small" control on a phone is still a
+     44px target. An earlier draft had --h-sm at 38px, which quietly put the
+     History tabs, the seed filter and Sign out below the floor the rest of the
+     system advertises. Small means small on a pointer, not on a thumb. */
   --tap: 44px;
-  --h-sm: 38px;
+  --h-sm: 44px;
   --h-md: 44px;
   --h-lg: 52px;
 
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
-@media (min-width: 40rem) {
+/* Density is a *pointer* decision, not a width one. Gating this on width alone
+   handed an iPad in portrait (768px, touch-only) 30px tab targets — width used
+   as a proxy for input device, and the proxy is wrong on exactly the devices
+   the 44px floor exists for. `pointer: fine` asks the real question. */
+@media (min-width: 40rem) and (pointer: fine) {
   :root {
     --h-sm: 30px;
     --h-md: 36px;

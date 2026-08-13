@@ -86,16 +86,21 @@ export function ConnectionsPage() {
         </EmptyState>
       ) : null}
 
-      <ul className="panel panel-list">
-        {rows.map((row) => (
-          <ConnectionRow
-            key={row.id}
-            connection={row}
-            onConnect={connect.start}
-            busy={connect.phase === "waiting"}
-          />
-        ))}
-      </ul>
+      {/* Only when there is something to put in it. A `.panel` has a border and
+          a shadow, so rendering it empty left a 2px bordered strip under the
+          empty state — on the screen a brand-new user sees first. */}
+      {rows.length > 0 ? (
+        <ul className="panel panel-list">
+          {rows.map((row) => (
+            <ConnectionRow
+              key={row.id}
+              connection={row}
+              onConnect={connect.start}
+              busy={connect.phase === "waiting"}
+            />
+          ))}
+        </ul>
+      ) : null}
 
       <h3 className="section-head">Add a connection</h3>
       <ul className="panel panel-list">

@@ -129,12 +129,6 @@ button:disabled,
   flex-wrap: wrap;
 }
 
-/* Size a whole cluster at once: every child takes the large height. */
-.actions-lg > button,
-.actions-lg > .button {
-  min-height: var(--h-lg);
-}
-
 .actions-end {
   justify-content: flex-end;
 }
@@ -166,6 +160,8 @@ select {
   -webkit-appearance: none;
   appearance: none;
   padding-right: 34px;
+  /* stroke is --muted spelled out: a data URI cannot read a custom
+     property, so this one value has to be kept in step by hand. */
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%235b6472' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
   background-repeat: no-repeat;
   background-position: right 12px center;
@@ -184,7 +180,10 @@ select {
   color: var(--faint);
 }
 
-@media (min-width: 40rem) {
+/* Same reasoning as the control heights in tokens.css: the 16px floor exists to
+   stop iOS zooming on focus, so it must survive on any touch device regardless
+   of how wide the window is. */
+@media (min-width: 40rem) and (pointer: fine) {
   input,
   select,
   textarea {
@@ -255,16 +254,6 @@ select {
 }
 
 .panel-link:hover {
-  background: var(--surface-2);
-}
-
-.panel-body {
-  padding: 14px;
-}
-
-.panel-foot {
-  padding: 10px 14px;
-  border-top: 1px solid var(--line);
   background: var(--surface-2);
 }
 
@@ -565,14 +554,6 @@ select {
   margin: 0 auto;
   font-size: 13.5px;
   color: var(--muted);
-}
-
-.rows {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 10px;
 }
 
 .plain-list {

@@ -344,18 +344,24 @@ Create `apps/web/src/styles/tokens.css`:
     0 1px 2px rgb(21 24 28 / 6%),
     0 12px 32px rgb(21 24 28 / 12%);
 
-  /* Control heights. Touch is the un-qualified default; >=40rem subtracts 8px.
-     --h-md at base is exactly --tap, so the 44px touch floor holds without a
-     separate rule. */
+  /* Control heights. Touch is the un-qualified default and *every* size sits at
+     or above --tap, including --h-sm: a "small" control on a phone is still a
+     44px target. An earlier draft had --h-sm at 38px, which quietly put the
+     History tabs, the seed filter and Sign out below the floor the rest of the
+     system advertises. Small means small on a pointer, not on a thumb. */
   --tap: 44px;
-  --h-sm: 38px;
+  --h-sm: 44px;
   --h-md: 44px;
   --h-lg: 52px;
 
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
-@media (min-width: 40rem) {
+/* Density is a *pointer* decision, not a width one. Gating this on width alone
+   handed an iPad in portrait (768px, touch-only) 30px tab targets — width used
+   as a proxy for input device, and the proxy is wrong on exactly the devices
+   the 44px floor exists for. `pointer: fine` asks the real question. */
+@media (min-width: 40rem) and (pointer: fine) {
   :root {
     --h-sm: 30px;
     --h-md: 36px;
@@ -409,8 +415,9 @@ Create `apps/web/src/styles/base.css`:
 }
 
 html {
-  /* No horizontal scroll anywhere — checked at 375px and on rotation. */
-  overflow-x: hidden;
+  /* No horizontal scroll anywhere — checked at 375px and on rotation.
+     `clip`, not `hidden`: see the note on `body` below. */
+  overflow-x: clip;
 }
 
 body {
@@ -423,7 +430,17 @@ body {
     "Segoe UI",
     sans-serif;
   -webkit-font-smoothing: antialiased;
-  overflow-x: hidden;
+  /* 🔴 `clip`, never `hidden`.
+     `html` already takes the overflow guard to the viewport, so `hidden` here
+     does not propagate — it makes `body` its own scroll container instead, and
+     every `position: sticky` descendant then resolves against a container that
+     never scrolls. Shipped as `hidden`, the left rail and the search page's
+     source panel both scrolled off the top: measured at −324px after an 800px
+     scroll, 0px with `clip`. Both elements exist *because* they are supposed to
+     stay put, so this one word decided whether the redesign's two headline
+     features worked at all. `clip` gives the same guard without the scroll
+     container. */
+  overflow-x: clip;
   /* Stops iOS Safari inflating text in landscape, which silently breaks a
      layout that was verified in portrait. */
   -webkit-text-size-adjust: 100%;
@@ -719,12 +736,6 @@ button:disabled,
   flex-wrap: wrap;
 }
 
-/* Size a whole cluster at once: every child takes the large height. */
-.actions-lg > button,
-.actions-lg > .button {
-  min-height: var(--h-lg);
-}
-
 .actions-end {
   justify-content: flex-end;
 }
@@ -756,6 +767,8 @@ select {
   -webkit-appearance: none;
   appearance: none;
   padding-right: 34px;
+  /* stroke is --muted spelled out: a data URI cannot read a custom
+     property, so this one value has to be kept in step by hand. */
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%235b6472' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
   background-repeat: no-repeat;
   background-position: right 12px center;
@@ -774,7 +787,10 @@ select {
   color: var(--faint);
 }
 
-@media (min-width: 40rem) {
+/* Same reasoning as the control heights in tokens.css: the 16px floor exists to
+   stop iOS zooming on focus, so it must survive on any touch device regardless
+   of how wide the window is. */
+@media (min-width: 40rem) and (pointer: fine) {
   input,
   select,
   textarea {
@@ -845,16 +861,6 @@ select {
 }
 
 .panel-link:hover {
-  background: var(--surface-2);
-}
-
-.panel-body {
-  padding: 14px;
-}
-
-.panel-foot {
-  padding: 10px 14px;
-  border-top: 1px solid var(--line);
   background: var(--surface-2);
 }
 
@@ -1155,14 +1161,6 @@ select {
   margin: 0 auto;
   font-size: 13.5px;
   color: var(--muted);
-}
-
-.rows {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 10px;
 }
 
 .plain-list {

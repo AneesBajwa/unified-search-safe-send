@@ -211,7 +211,7 @@ export function ConfirmDialog() {
             </button>
             <button
               type="button"
-              className="button button-primary button-lg gate-confirm"
+              className="button button-primary button-lg"
               disabled={pressed || send.isPending}
               onClick={() => {
                 if (inFlight.current) return;
